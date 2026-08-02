@@ -1,0 +1,27 @@
+project_id = "dappster"
+
+[auth]
+enabled = true
+site_url = "https://dappster.fun"
+additional_redirect_urls = ["https://dappster.fun/**", "http://localhost:3000/**"]
+enable_signup = true
+enable_anonymous_sign_ins = false
+password_min_length = 12
+
+[auth.email]
+# Dappster authenticates ownership through Supabase Web3 signatures. Password
+# signups are deliberately disabled so password-policy findings do not expose a
+# second, weaker path into wallet-owned accounts.
+enable_signup = false
+enable_confirmations = true
+double_confirm_changes = true
+secure_password_change = true
+
+[auth.web3.ethereum]
+enabled = true
+
+[auth.web3.solana]
+enabled = true
+
+[auth.rate_limit]
+web3 = 10

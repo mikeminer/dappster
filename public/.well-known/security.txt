@@ -1,0 +1,5 @@
+Contact: mailto:dev@dappster.fun
+Canonical: https://dappster.fun/.well-known/security.txt
+Policy: https://dappster.fun/trust
+Preferred-Languages: en, it
+Expires: 2027-07-31T23:59:59Z

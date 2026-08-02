@@ -1,0 +1,13 @@
+.git
+.next
+.next-*
+.gitnexus
+.cargo-target
+contracts/**/target
+tmp
+output
+node_modules
+.env
+.env.*
+*.log
+tsconfig.tsbuildinfo

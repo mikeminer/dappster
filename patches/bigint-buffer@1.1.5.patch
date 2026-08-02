@@ -1,0 +1,45 @@
+diff --git a/dist/node.js b/dist/node.js
+index 513168c89e387668a79b6beb109587b3eb41a7d0..7ade1e5a1f54947fe3083892dd2603d6dc2f68a9 100644
+--- a/dist/node.js
++++ b/dist/node.js
+@@ -1,15 +1,8 @@
+ 'use strict';
+ 
+ Object.defineProperty(exports, "__esModule", { value: true });
+-let converter;
+-{
+-    try {
+-        converter = require('bindings')('bigint_buffer');
+-    }
+-    catch (e) {
+-        console.warn('bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)');
+-    }
+-}
++// Dappster security patch: never load the vulnerable native converter.
++const converter = undefined;
+ /**
+  * Convert a little-endian buffer into a BigInt.
+  * @param buf The little-endian buffer to convert
+diff --git a/src/index.ts b/src/index.ts
+index 3c78463c2fac414612aa49a9fd27d529a2041ec0..df40852635bdad0ecd9c08d3f719281845d40823 100644
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -6,16 +6,8 @@ interface ConverterInterface {
+ 
+ declare var process: {browser: boolean;};
+ 
+-let converter: ConverterInterface;
+-
+-if (!process.browser) {
+-  try {
+-    converter = require('bindings')('bigint_buffer');
+-  } catch (e) {
+-    console.warn(
+-        'bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)');
+-  }
+-}
++// Dappster security patch: never load the vulnerable native converter.
++const converter: ConverterInterface | undefined = undefined;
+ 
+ /**
+  * Convert a little-endian buffer into a BigInt.
