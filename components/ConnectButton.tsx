@@ -349,6 +349,16 @@ function ConnectButtonCore({ mode = "button", redirectTo, reown }: { mode?: "but
     setLocalSessionState(null)
     setAuthenticatedWallet(null)
     setLinkedWallets([])
+
+    // A full navigation on authenticated pages discards account data held by
+    // client components, so a signed-out user never sees the previous
+    // account's dashboard while React is waiting for a refresh.
+    if (window.location.pathname.startsWith("/dashboard")) {
+      window.location.replace("/")
+      return
+    }
+
+    router.refresh()
   }
 
   const connected = Boolean(authenticatedWallet || localSession)
