@@ -35,7 +35,16 @@ export function DashboardClient() {
 
   useEffect(() => {
     apiFetch<Workspace>("/api/me").then(payload => {
-      const remembered = JSON.parse(localStorage.getItem("dappster-projects") || "[]") as Project[]
+      let remembered: Project[] = []
+      if (payload.mode === "local") {
+        try {
+          remembered = JSON.parse(localStorage.getItem("dappster-projects") || "[]") as Project[]
+        } catch {
+          localStorage.removeItem("dappster-projects")
+        }
+      } else {
+        localStorage.removeItem("dappster-projects")
+      }
       const merged = [...payload.dapps]
       for (const project of remembered) if (!merged.some(item => item.id === project.id)) merged.push(project)
       setWorkspace({ ...payload, dapps: merged.sort((a, b) => (b.updated_at || "").localeCompare(a.updated_at || "")) })
@@ -63,8 +72,10 @@ export function DashboardClient() {
       const isListed = !project.is_listed
       await apiFetch(`/api/dapps/${project.id}`, { method: "PATCH", body: JSON.stringify({ is_listed: isListed, listing: project }) })
       setWorkspace(current => current ? { ...current, dapps: current.dapps.map(item => item.id === project.id ? { ...item, is_listed: isListed } : item) } : current)
-      const remembered = JSON.parse(localStorage.getItem("dappster-projects") || "[]") as Project[]
-      localStorage.setItem("dappster-projects", JSON.stringify(remembered.map(item => item.id === project.id ? { ...item, is_listed: isListed } : item)))
+      if (workspace?.mode === "local") {
+        const remembered = JSON.parse(localStorage.getItem("dappster-projects") || "[]") as Project[]
+        localStorage.setItem("dappster-projects", JSON.stringify(remembered.map(item => item.id === project.id ? { ...item, is_listed: isListed } : item)))
+      }
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not update listing") }
     finally { setUpdatingId("") }
   }
@@ -107,8 +118,10 @@ export function DashboardClient() {
       })
       const deletedId = projectToDelete.id
       setWorkspace(current => current ? { ...current, dapps: current.dapps.filter(item => item.id !== deletedId) } : current)
-      const remembered = JSON.parse(localStorage.getItem("dappster-projects") || "[]") as Project[]
-      localStorage.setItem("dappster-projects", JSON.stringify(remembered.filter(item => item.id !== deletedId)))
+      if (workspace?.mode === "local") {
+        const remembered = JSON.parse(localStorage.getItem("dappster-projects") || "[]") as Project[]
+        localStorage.setItem("dappster-projects", JSON.stringify(remembered.filter(item => item.id !== deletedId)))
+      }
       setProjectToDelete(null)
       setDeleteConfirmation("")
     } catch (cause) {
