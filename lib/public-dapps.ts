@@ -13,6 +13,7 @@ export type PublicDapp = Record<string, unknown> & {
   description?: string
   chain: Chain
   contract_chain_id?: number | null
+  contract_network?: string | null
   tags?: string[]
   is_featured?: boolean
   publisher_name?: string
@@ -63,7 +64,7 @@ export async function getPublicDapps({ page = 1, limit = 12, chain, featured, ta
   }
 
   const query: Record<string, string> = {
-    select: "id,owner_id,name,description,chain,contract_address,contract_chain_id,ipfs_hash,ipfs_url,app_visibility,frontend_visibility,is_featured,tags,screenshot_url,created_at",
+    select: "id,owner_id,name,description,chain,contract_address,contract_chain_id,contract_network,ipfs_hash,ipfs_url,app_visibility,frontend_visibility,is_featured,tags,screenshot_url,created_at",
     is_listed: "eq.true",
     order: "is_featured.desc,created_at.desc",
     offset: String((safePage - 1) * safeLimit),

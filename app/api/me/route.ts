@@ -14,7 +14,7 @@ export async function GET(request: Request) {
     }
     const [profiles, dapps, wallets, creditTransactions] = await Promise.all([
       supabaseRequest<unknown[]>({ path: "profiles", query: { id: `eq.${user.id}`, select: "id,wallet_address,chain,username,credits,plan,plan_expires_at,created_at", limit: "1" } }),
-      supabaseRequest<unknown[]>({ path: "dapps", query: { owner_id: `eq.${user.id}`, select: "id,name,description,chain,contract_address,contract_tx_hash,contract_chain_id,ipfs_hash,ipfs_url,deploy_status,is_listed,is_featured,tags,audit_status,created_at,updated_at", order: "updated_at.desc" } }),
+      supabaseRequest<unknown[]>({ path: "dapps", query: { owner_id: `eq.${user.id}`, select: "id,name,description,chain,contract_address,contract_tx_hash,contract_chain_id,contract_network,ipfs_hash,ipfs_url,deploy_status,is_listed,is_featured,tags,audit_status,created_at,updated_at", order: "updated_at.desc" } }),
       getAccountWallets(user.id),
       supabaseRequest<unknown[]>({ path: "credit_transactions", query: { user_id: `eq.${user.id}`, select: "id,amount,type,description,created_at", order: "created_at.desc", limit: "100" } }),
     ])
