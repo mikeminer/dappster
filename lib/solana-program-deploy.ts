@@ -33,6 +33,11 @@ const UPGRADEABLE_PROGRAM_BYTES = 36
 const UPGRADEABLE_PROGRAMDATA_METADATA_BYTES = 45
 const UPGRADEABLE_WRITE_CHUNK_BYTES = 900
 const DEVNET_RECOVERY_AIRDROP_MIN_LAMPORTS = 100_000_000
+const PROGRAM_WRITE_RATE_LIMIT_RETRIES = 7
+const PROGRAM_WRITE_BATCH_SIZE = 8
+const PROGRAM_WRITE_PUBLIC_RPC_DELAY_MS = 325
+const PROGRAM_WRITE_PRIVATE_RPC_DELAY_MS = 50
+const PROGRAM_WRITE_CONFIRM_TIMEOUT_MS = 75_000
 
 function commandError(label: string, stdout: string, stderr: string) {
   const details = [stderr, stdout].filter(Boolean).join("\n").slice(-12_000)
@@ -439,6 +444,84 @@ async function sendLoaderTransaction(
   }
 }
 
+async function retryRpcRateLimit<T>(operation: () => Promise<T>, label: string) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await operation()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      const rateLimited = /(?:\b429\b|too many requests|rate[ -]?limit)/i.test(message)
+      if (!rateLimited || attempt >= PROGRAM_WRITE_RATE_LIMIT_RETRIES) {
+        throw new Error(`${label} failed: ${message}`)
+      }
+      const delayMs = Math.min(15_000, 750 * (2 ** attempt)) + Math.floor(Math.random() * 250)
+      await new Promise(resolve => setTimeout(resolve, delayMs))
+    }
+  }
+}
+
+async function sendProgramWriteBatch(
+  connection: Connection,
+  payer: Keypair,
+  buffer: PublicKey,
+  writes: Array<{ offset: number; bytes: Uint8Array }>,
+  publicRpc: boolean,
+) {
+  const latestBlockhash = await retryRpcRateLimit(
+    () => connection.getLatestBlockhash("confirmed"),
+    "Program write blockhash",
+  )
+  const submitted: Array<{ offset: number; signature: string }> = []
+  const sendDelayMs = publicRpc ? PROGRAM_WRITE_PUBLIC_RPC_DELAY_MS : PROGRAM_WRITE_PRIVATE_RPC_DELAY_MS
+
+  for (const write of writes) {
+    const transaction = new Transaction({
+      feePayer: payer.publicKey,
+      blockhash: latestBlockhash.blockhash,
+      lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+    }).add(writeBufferInstruction(buffer, payer.publicKey, write.offset, write.bytes))
+    transaction.sign(payer)
+    const rawTransaction = transaction.serialize()
+    const signature = await retryRpcRateLimit(
+      () => connection.sendRawTransaction(rawTransaction, {
+        skipPreflight: true,
+        preflightCommitment: "confirmed",
+        maxRetries: 20,
+      }),
+      `Program write at byte ${write.offset}`,
+    )
+    submitted.push({ offset: write.offset, signature })
+    await new Promise(resolve => setTimeout(resolve, sendDelayMs))
+  }
+
+  const deadline = Date.now() + PROGRAM_WRITE_CONFIRM_TIMEOUT_MS
+  while (Date.now() < deadline) {
+    const statuses = await retryRpcRateLimit(
+      () => connection.getSignatureStatuses(submitted.map(item => item.signature), { searchTransactionHistory: true }),
+      `Program write confirmation at byte ${writes[0]?.offset ?? 0}`,
+    )
+    let confirmed = 0
+    for (let index = 0; index < submitted.length; index += 1) {
+      const status = statuses.value[index]
+      if (status?.err) {
+        throw new Error(`Program write at byte ${submitted[index].offset} failed: ${JSON.stringify(status.err)}`)
+      }
+      if (status?.confirmationStatus === "confirmed" || status?.confirmationStatus === "finalized") confirmed += 1
+    }
+    if (confirmed === submitted.length) return
+
+    const blockHeight = await retryRpcRateLimit(
+      () => connection.getBlockHeight("confirmed"),
+      "Program write block height",
+    )
+    if (blockHeight > latestBlockhash.lastValidBlockHeight) {
+      throw new Error(`Program write batch at byte ${writes[0]?.offset ?? 0} expired before confirmation`)
+    }
+    await new Promise(resolve => setTimeout(resolve, 750))
+  }
+  throw new Error(`Program write batch at byte ${writes[0]?.offset ?? 0} was not confirmed in time`)
+}
+
 function programDataAuthority(data: Buffer) {
   if (data.length < UPGRADEABLE_PROGRAMDATA_METADATA_BYTES || data.readUInt32LE(0) !== 3) return null
   if (data[12] !== 1) return "immutable"
@@ -558,20 +641,19 @@ export async function deployCompiledSolanaProgram(
     )
     bufferCreated = true
 
-    const writes: Promise<string>[] = []
-    for (let offset = 0; offset < artifact.length; offset += UPGRADEABLE_WRITE_CHUNK_BYTES) {
-      const bytes = artifact.slice(offset, Math.min(offset + UPGRADEABLE_WRITE_CHUNK_BYTES, artifact.length))
-      writes.push(sendLoaderTransaction(
-        connection,
-        new Transaction().add(writeBufferInstruction(buffer.publicKey, payer.publicKey, offset, bytes)),
-        [payer],
-        `Program write at byte ${offset}`,
-      ))
-      if (rpcUrl(cluster).includes("solana.com")) await new Promise(resolve => setTimeout(resolve, 250))
+    const publicRpc = rpcUrl(cluster).includes("solana.com")
+    for (let batchOffset = 0; batchOffset < artifact.length; batchOffset += UPGRADEABLE_WRITE_CHUNK_BYTES * PROGRAM_WRITE_BATCH_SIZE) {
+      const writes: Array<{ offset: number; bytes: Uint8Array }> = []
+      for (let index = 0; index < PROGRAM_WRITE_BATCH_SIZE; index += 1) {
+        const offset = batchOffset + index * UPGRADEABLE_WRITE_CHUNK_BYTES
+        if (offset >= artifact.length) break
+        const bytes = artifact.slice(offset, Math.min(offset + UPGRADEABLE_WRITE_CHUNK_BYTES, artifact.length))
+        writes.push({ offset, bytes })
+      }
+      // Share one blockhash and one status poll per batch instead of spawning
+      // a confirmation poller for every program chunk at once.
+      await sendProgramWriteBatch(connection, payer, buffer.publicKey, writes, publicRpc)
     }
-    const writeResults = await Promise.allSettled(writes)
-    const rejectedWrite = writeResults.find((result): result is PromiseRejectedResult => result.status === "rejected")
-    if (rejectedWrite) throw rejectedWrite.reason
 
     await sendLoaderTransaction(
       connection,
