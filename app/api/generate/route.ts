@@ -11,6 +11,7 @@ import { getSupportedEvmChain } from "@/lib/evm-chains"
 import { compileSolidity } from "@/lib/solidity"
 import { injectCompiledAbiIntoFrontend } from "@/lib/frontend-abi"
 import { CHAIN_IDS, getChainAdapter } from "@/lib/chain-adapters"
+export const maxDuration = 300
 
 const requestSchema = z.object({ prompt: z.string().min(12).max(4000), chain: z.enum(CHAIN_IDS), evmChainId: z.number().int().positive().optional(), includeAudit: z.boolean().optional().default(false), creditBurn: creditBurnProofSchema.optional(), dappId: z.string().uuid().optional() })
 
@@ -32,9 +33,6 @@ export async function POST(request: Request) {
     const generationPrompt = evmChain
       ? `${input.prompt}\n\nTarget EVM network: ${evmChain.name} (chain ID ${evmChain.id}).`
       : `${input.prompt}\n\nTarget ecosystem: ${adapter.name}. Language: ${adapter.language}. Toolchain: ${adapter.toolchain}. Initial deployment target: ${adapter.testNetwork}.`
-    const creditsRemaining = activePro ? profile.credits
-      : user.isDemo ? localSpend(user.id, CREDIT_COSTS.generate)
-        : await verifyAndSpendCreditBurn(user.id, CREDIT_COSTS.generate, `${input.chain.toUpperCase()} dApp generation`, input.creditBurn)
     const preparedLocalDapp = user.isDemo && input.dappId ? localGetDapp(input.dappId) : undefined
     const preparedRows = !user.isDemo && input.dappId
       ? await supabaseRequest<Array<{ id: string; name: string; description: string | null; chain: string; contract_code: string | null; frontend_code: string | null }>>({
@@ -52,11 +50,19 @@ export async function POST(request: Request) {
         frontend: preparedDapp.frontend_code,
         deployInstructions: "This recovered Dappster project is ready for review and deployment.",
         warnings: [],
-        creditsRemaining,
+        creditsRemaining: profile.credits,
         mode: user.isDemo ? "local" : "supabase",
       })
     }
-    const generation = await callAI("generate", generationPrompt, input.chain, { evmChainId: evmChain?.id, signal: request.signal })
+
+    const creditsRemaining = activePro ? profile.credits
+      : user.isDemo ? localSpend(user.id, CREDIT_COSTS.generate)
+        : await verifyAndSpendCreditBurn(user.id, CREDIT_COSTS.generate, `${input.chain.toUpperCase()} dApp generation`, input.creditBurn)
+
+    // Do not bind model execution to the browser connection. Mobile browsers
+    // may suspend the fetch while this Vercel function can still finish and
+    // persist the prepared dApp for recovery from the Dashboard.
+    const generation = await callAI("generate", generationPrompt, input.chain, { evmChainId: evmChain?.id })
     const name = generation.contractName || generation.programName || "Untitled dApp"
     let frontend = generation.frontend
     if (input.chain === "evm") {

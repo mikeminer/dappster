@@ -371,7 +371,7 @@ export function PromptBuilder() {
         runId = ++generationRunRef.current
         setLoading(true)
         setError("")
-        const recovered = await recoverPreparedGeneration(pending, 12, runId)
+        const recovered = await recoverPreparedGeneration(pending, 132, runId)
         if (active && generationRunRef.current === runId && !recovered) setError("Generation is still processing. Dappster will recover it when it is ready; you can safely keep this page open or return later.")
       } catch {
         if (active) localStorage.removeItem(PENDING_GENERATION_KEY)
@@ -407,8 +407,22 @@ export function PromptBuilder() {
         contract_network?: string | null
         ipfs_hash?: string
         ipfs_url?: string
-      }>(`/api/dapps/${projectId}`).then(project => {
-        if (!project.contract_code || !project.frontend_code) throw new Error("This generated project is incomplete or unavailable")
+      }>(`/api/dapps/${projectId}`).then(async project => {
+        if (!project.contract_code || !project.frontend_code) {
+          const stored = JSON.parse(localStorage.getItem(PENDING_GENERATION_KEY) || "null") as PreparedGeneration | null
+          const pending = stored?.dappId === project.id ? stored : null
+          if (!pending) throw new Error("This generation was interrupted before its recoverable job was recorded. Generate it again or delete this incomplete project from the Dashboard.")
+          setChain(pending.chain)
+          setPrompt(pending.prompt)
+          if (pending.evmChainId && getSupportedEvmChain(pending.evmChainId)) setEvmChainId(pending.evmChainId)
+          if (pending.solanaCluster) setSolanaCluster(pending.solanaCluster)
+          localStorage.setItem(PENDING_GENERATION_KEY, JSON.stringify(pending))
+          const runId = ++generationRunRef.current
+          setLoading(true)
+          const recovered = await recoverPreparedGeneration(pending, 132, runId)
+          if (!recovered) throw new Error("Generation is still processing. Dappster will keep this project recoverable; return to it from the Dashboard in a few minutes.")
+          return
+        }
         setChain(project.chain)
         setPrompt(project.description || `Resume deployment of ${project.name}`)
         setGeneration({
@@ -445,9 +459,13 @@ export function PromptBuilder() {
         if (project.ipfs_hash || project.ipfs_url) setDeployment({ cid: project.ipfs_hash || "published", url: project.ipfs_url || resolveIpfsUrl(project.ipfs_hash) || "", creditsRemaining: 0, status: "live" })
         setTab("contract")
       }).catch(cause => setError(cause instanceof Error ? cause.message : "Saved project could not be loaded"))
+        .finally(() => setLoading(false))
       return
     }
     localStorage.removeItem("dappster-projects")
+    // The recovery helper closes over stable setters; depending on its
+    // per-render identity would restart the same long-running recovery loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setSolanaCluster])
 
   function applyRecoveredGeneration(project: SavedGenerationProject, pending: PreparedGeneration) {
@@ -482,6 +500,35 @@ export function PromptBuilder() {
       } catch {
         // The authenticated project may still be committing after a suspended request.
       }
+      // Retry only after the original five-minute server budget has expired.
+      // Reusing the same dApp and burn proof keeps credit synchronization
+      // idempotent without starting concurrent model calls.
+      if (attempt === 124) {
+        try {
+          const output = await apiFetch<Generation>("/api/generate", {
+            method: "POST",
+            body: JSON.stringify({
+              prompt: pending.prompt,
+              chain: pending.chain,
+              evmChainId: pending.evmChainId,
+              includeAudit: false,
+              creditBurn: pending.creditBurn,
+              dappId: pending.dappId,
+            }),
+          })
+          if (generationRunRef.current !== runId) return false
+          setGeneration(output)
+          setCreditBalance(output.creditsRemaining)
+          setTab("contract")
+          setError("")
+          clearPendingCreditBurn(pending.creditBurn)
+          localStorage.removeItem(PENDING_GENERATION_KEY)
+          rememberProject(output, pending.prompt, pending.chain, undefined, undefined, pending.evmChainId, pending.solanaCluster)
+          return true
+        } catch {
+          // The original request may still be finishing; keep polling.
+        }
+      }
       if (attempt + 1 < attempts) await new Promise(resolve => window.setTimeout(resolve, 2500))
     }
     return false
@@ -504,8 +551,6 @@ export function PromptBuilder() {
     setDeployment(null)
     let prepared: PreparedGeneration | null = null
     try {
-      const creditBurn = await burnCreditsFromUserWallet(5, `${requestedChain} dApp generation`)
-      if (controller.signal.aborted) throw new DOMException("Generation canceled", "AbortError")
       let savedPending = JSON.parse(localStorage.getItem(PENDING_GENERATION_KEY) || "null") as PreparedGeneration | null
       if (savedPending?.dappId) {
         const workspace = await apiFetch<{ dapps?: Array<{ id: string }> }>("/api/me")
@@ -516,8 +561,20 @@ export function PromptBuilder() {
       }
       if (savedPending?.dappId) {
         if (savedPending.prompt !== requestedPrompt || savedPending.chain !== requestedChain || savedPending.evmChainId !== requestedEvmChainId) {
-          throw new Error("Another generation is still pending. Wait for Dappster to recover it before starting a different project.")
+          const oldProject = await apiFetch<SavedGenerationProject>(`/api/dapps/${savedPending.dappId}`).catch(() => null)
+          const stale = Date.now() - savedPending.startedAt > 20 * 60 * 1000
+          if ((oldProject?.contract_code && oldProject.frontend_code) || stale) {
+            clearPendingCreditBurn(savedPending.creditBurn)
+            localStorage.removeItem(PENDING_GENERATION_KEY)
+            savedPending = null
+          } else {
+            throw new Error("Another generation is still processing. Open that project from the Dashboard to recover it before starting a different one.")
+          }
         }
+      }
+      const creditBurn = savedPending?.creditBurn ?? await burnCreditsFromUserWallet(5, `${requestedChain} dApp generation`)
+      if (controller.signal.aborted) throw new DOMException("Generation canceled", "AbortError")
+      if (savedPending?.dappId) {
         prepared = { ...savedPending, creditBurn }
       } else {
         const created = await apiFetch<Array<{ id: string }>>("/api/dapps", {
@@ -550,7 +607,7 @@ export function PromptBuilder() {
       if (generationRunRef.current !== runId) return
       const message = cause instanceof Error ? cause.message : "Generation failed"
       const interrupted = /load failed|failed to fetch|network request failed|networkerror/i.test(message)
-      if (prepared && interrupted && await recoverPreparedGeneration(prepared, 12, runId)) return
+      if (prepared && interrupted && await recoverPreparedGeneration(prepared, 132, runId)) return
       setError(interrupted && prepared
         ? "The mobile browser paused the connection. Generation is still recoverable and Dappster will resume it when the saved result is ready."
         : message)
