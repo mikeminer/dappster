@@ -46,7 +46,7 @@ function isolatedIpfsPolicy(allowWalletInjection: boolean) {
     "object-src 'none'",
     "frame-ancestors 'self'",
     "form-action 'none'",
-    "script-src 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://unpkg.com https://cdn.jsdelivr.net",
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://unpkg.com https://cdn.jsdelivr.net",
     "style-src 'unsafe-inline' https:",
     "img-src data: blob: https:",
     "font-src data: https:",
