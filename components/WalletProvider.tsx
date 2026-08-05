@@ -28,6 +28,10 @@ export function useSolanaDeploymentNetwork() {
 }
 
 export function Web3Providers({ children }: { children: React.ReactNode }) {
+  return <EvmSolanaProviders><DAppKitProvider dAppKit={suiDAppKit}><AptosWalletAdapterProvider autoConnect dappConfig={{ network: Network.DEVNET }} disableTelemetry>{children}</AptosWalletAdapterProvider></DAppKitProvider></EvmSolanaProviders>
+}
+
+export function EvmSolanaProviders({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => new QueryClient())
   const [cluster, setCluster] = useState<SolanaDeploymentCluster>("devnet")
   const wallets = useMemo(() => [new PhantomWalletAdapter()], [])
@@ -35,5 +39,5 @@ export function Web3Providers({ children }: { children: React.ReactNode }) {
     ? process.env.NEXT_PUBLIC_SOLANA_DEVNET_RPC_URL || "https://api.devnet.solana.com"
     : process.env.NEXT_PUBLIC_SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com"
   const solanaNetwork = useMemo(() => ({ cluster, endpoint, setCluster }), [cluster, endpoint])
-  return <WagmiProvider config={wagmiConfig}><QueryClientProvider client={queryClient}><DAppKitProvider dAppKit={suiDAppKit}><AptosWalletAdapterProvider autoConnect dappConfig={{ network: Network.DEVNET }} disableTelemetry><SolanaDeploymentNetworkContext.Provider value={solanaNetwork}><ConnectionProvider endpoint={endpoint}><SolanaWalletProvider wallets={wallets} autoConnect>{children}</SolanaWalletProvider></ConnectionProvider></SolanaDeploymentNetworkContext.Provider></AptosWalletAdapterProvider></DAppKitProvider></QueryClientProvider></WagmiProvider>
+  return <WagmiProvider config={wagmiConfig}><QueryClientProvider client={queryClient}><SolanaDeploymentNetworkContext.Provider value={solanaNetwork}><ConnectionProvider endpoint={endpoint}><SolanaWalletProvider wallets={wallets} autoConnect>{children}</SolanaWalletProvider></ConnectionProvider></SolanaDeploymentNetworkContext.Provider></QueryClientProvider></WagmiProvider>
 }

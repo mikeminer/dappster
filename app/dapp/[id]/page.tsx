@@ -1,6 +1,6 @@
-import { DappDetailClient } from "@/components/DappDetailClient"
+import { DappDetailIsland } from "@/components/DappDetailIsland"
 
 export default async function DappDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  return <DappDetailClient id={id} />
+  return <DappDetailIsland id={id} />
 }

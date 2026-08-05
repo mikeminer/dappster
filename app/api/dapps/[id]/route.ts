@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { revalidateTag } from "next/cache"
 import { z } from "zod"
 import { CHAIN_IDS } from "@/lib/chain-adapters"
 import { getOptionalRequestUser, getRequestUser, hasSupabaseConfig } from "@/lib/runtime"
@@ -142,10 +143,12 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
           is_listed: input.is_listed,
         })
       }
+      revalidateTag("public-dapps")
       return NextResponse.json({ ok: true, is_listed: input.is_listed, mode: "pinata" })
     }
     const { listing: _listing, ...updates } = input
     await supabaseRequest({ path: "dapps", method: "PATCH", query: { id: `eq.${id}`, owner_id: `eq.${user.id}` }, body: { ...updates, updated_at: new Date().toISOString() } })
+    revalidateTag("public-dapps")
     return NextResponse.json({ ok: true })
   } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Could not update dApp" }, { status: 400 }) }
 }
@@ -182,6 +185,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
         })
       }
       localDeleteDapp(id)
+      revalidateTag("public-dapps")
       return NextResponse.json({ ok: true })
     }
 
@@ -196,6 +200,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
       method: "DELETE",
       query: { id: `eq.${id}`, owner_id: `eq.${user.id}` },
     })
+    revalidateTag("public-dapps")
     return NextResponse.json({ ok: true })
   } catch (error) {
     if (error instanceof z.ZodError) return NextResponse.json({ error: "Type the required confirmation statement exactly" }, { status: 400 })

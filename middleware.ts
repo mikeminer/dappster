@@ -1,13 +1,16 @@
 import { NextRequest, NextResponse } from "next/server"
 
-function applicationPolicy(nonce: string) {
+function applicationPolicy(nonce?: string) {
   return [
     "default-src 'self'",
     "base-uri 'self'",
     "object-src 'none'",
     "frame-ancestors 'none'",
     "form-action 'self'",
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
+    nonce
+      ? `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`
+      : "script-src 'self' 'unsafe-inline'",
+    "script-src-attr 'none'",
     "style-src 'self' 'unsafe-inline'",
     "style-src-attr 'unsafe-inline'",
     "img-src 'self' data: blob: https:",
@@ -60,13 +63,16 @@ function isolatedIpfsPolicy(allowWalletInjection: boolean) {
 export function middleware(request: NextRequest) {
   const isBuilder = request.nextUrl.pathname === "/build"
   const isIpfs = request.nextUrl.pathname.startsWith("/ipfs/")
+  const isNonceProtectedPage = ["/build", "/audit", "/dashboard", "/login"].includes(request.nextUrl.pathname)
+    || request.nextUrl.pathname.startsWith("/admin/")
+    || request.nextUrl.pathname.startsWith("/dapp/")
   const hostname = (request.headers.get("host") || request.nextUrl.hostname).split(":")[0].toLowerCase()
   const isDappRuntimeHost = hostname === "dappster-fun.vercel.app" || hostname === "apps.dappster.fun"
-  const nonce = btoa(crypto.randomUUID())
+  const nonce = isNonceProtectedPage ? btoa(crypto.randomUUID()) : undefined
   const policy = isBuilder ? isolatedBuilderPolicy() : isIpfs ? isolatedIpfsPolicy(isDappRuntimeHost) : applicationPolicy(nonce)
   const requestHeaders = new Headers(request.headers)
   requestHeaders.set("Content-Security-Policy", policy)
-  if (!isBuilder && !isIpfs) requestHeaders.set("x-nonce", nonce)
+  if (!isBuilder && !isIpfs && nonce) requestHeaders.set("x-nonce", nonce)
 
   const response = NextResponse.next({ request: { headers: requestHeaders } })
   response.headers.set("Content-Security-Policy", policy)
