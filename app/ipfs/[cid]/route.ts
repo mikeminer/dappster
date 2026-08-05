@@ -4,6 +4,7 @@ import { injectCompiledAbiIntoFrontend } from "@/lib/frontend-abi"
 import { buildEvmRuntimeCompatibilityScript } from "@/lib/frontend-shell"
 import { compileSolidity } from "@/lib/solidity"
 import { supabaseRequest } from "@/lib/supabase"
+import { buildSolanaRuntimeCompatibilityScript, inferLegacySolanaIdl, replaceSolanaProgramId, wrapSolanaBabelSource } from "@/lib/solana-frontend"
 
 export const dynamic = "force-dynamic"
 
@@ -51,17 +52,36 @@ export async function GET(_request: Request, { params }: { params: Promise<{ cid
       let html = await upstream.text()
       let contractAbi: Abi | undefined
       let evmChainId: number | undefined
+      let solanaCompatibility = buildSolanaRuntimeCompatibilityScript()
+      const embedded = html.match(/window\.__DAPPSTER__=({[\s\S]*?});<\/script>/)?.[1]
+      let embeddedRuntime: { abi?: Abi; chain?: string; contractAddress?: string } | undefined
       try {
-        const embedded = html.match(/window\.__DAPPSTER__=({[\s\S]*?});<\/script>/)?.[1]
-        const runtime = embedded ? JSON.parse(embedded) as { abi?: Abi } : undefined
+        embeddedRuntime = embedded ? JSON.parse(embedded) as { abi?: Abi; chain?: string; contractAddress?: string } : undefined
+        if (embeddedRuntime?.chain === "solana" && embeddedRuntime.contractAddress) {
+          const babelPattern = /(<script type="text\/babel"[^>]*>)([\s\S]*?)(<\/script>)/
+          const babel = babelPattern.exec(html)
+          if (babel) {
+            const repairedSource = replaceSolanaProgramId(babel[2], embeddedRuntime.contractAddress)
+            const solanaIdl = inferLegacySolanaIdl(repairedSource, embeddedRuntime.contractAddress)
+            solanaCompatibility = buildSolanaRuntimeCompatibilityScript(solanaIdl)
+            html = html.replace(babelPattern, `$1${wrapSolanaBabelSource(repairedSource)}$3`)
+          }
+        }
+      } catch {
+        // A malformed legacy runtime must not prevent the immutable artifact from loading.
+      }
+      try {
         const compiledRuntime = await compiledRuntimeForCid(cid)
-        contractAbi = Array.isArray(runtime?.abi) ? runtime.abi : compiledRuntime.abi
+        contractAbi = Array.isArray(embeddedRuntime?.abi) ? embeddedRuntime.abi : compiledRuntime.abi
         evmChainId = compiledRuntime.chainId
         if (contractAbi) html = injectCompiledAbiIntoFrontend(html, contractAbi)
       } catch {
         // Keep the immutable IPFS artifact available even if legacy ABI recovery fails.
       }
-      const compatibility = `<script>${buildEvmRuntimeCompatibilityScript(contractAbi, evmChainId)}if(window.solanaWeb3)Object.assign(window,window.solanaWeb3);</script>`
+      const solanaAsset = embeddedRuntime?.chain === "solana" && !html.includes("/runtime/solana-runtime.js")
+        ? '<script src="/runtime/solana-runtime.js"></script>'
+        : ""
+      const compatibility = `${solanaAsset}<script>${buildEvmRuntimeCompatibilityScript(contractAbi, evmChainId)}${solanaCompatibility}if(window.solanaWeb3)Object.assign(window,window.solanaWeb3);</script>`
       html = html.replace('<script type="text/babel"', `${compatibility}<script type="text/babel"`)
       return new Response(html, { status: 200, headers })
     }

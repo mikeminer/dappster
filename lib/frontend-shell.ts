@@ -1,5 +1,6 @@
 import type { Abi } from "viem"
 import { getSupportedEvmChain } from "@/lib/evm-chains"
+import { buildSolanaRuntimeCompatibilityScript, inferLegacySolanaIdl, replaceSolanaProgramId, wrapSolanaBabelSource } from "@/lib/solana-frontend"
 
 function browserReadySource(frontendCode: string) {
   const defaultFunction = frontendCode.match(/export\s+default\s+function\s+([A-Za-z_$][\w$]*)/)
@@ -213,8 +214,11 @@ export function buildEvmRuntimeCompatibilityScript(contractAbi?: Abi, chainId?: 
 
 export function buildHTMLShell(frontendCode: string, contractAddress: string, chain: string, preview = false, contractAbi?: Abi, evmChainId?: number) {
   const prepared = browserReadySource(frontendCode)
+  const solanaIdl = chain === "solana" ? inferLegacySolanaIdl(prepared.source, contractAddress) : undefined
+  const preparedSource = chain === "solana" ? replaceSolanaProgramId(prepared.source, contractAddress) : prepared.source
   const runtime = JSON.stringify({ contractAddress, chain, preview, abi: contractAbi || null, evmChain: chain === "evm" ? evmRuntimeChain(evmChainId) : undefined }).replace(/</g, "\\u003c")
   const evmCompatibility = buildEvmRuntimeCompatibilityScript(contractAbi, chain === "evm" ? evmChainId : undefined)
+  const solanaCompatibility = buildSolanaRuntimeCompatibilityScript(solanaIdl)
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -226,7 +230,7 @@ export function buildHTMLShell(frontendCode: string, contractAddress: string, ch
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
-  <script src="https://unpkg.com/@solana/web3.js@1.98.4/lib/index.iife.min.js"></script>
+  ${chain === "solana" ? '<script src="/runtime/solana-runtime.js"></script>' : ""}
   <script src="https://unpkg.com/@babel/standalone@7.26.2/babel.min.js"></script>
   <style>
     html,body,#root{min-height:100%;margin:0}
@@ -276,13 +280,21 @@ export function buildHTMLShell(frontendCode: string, contractAddress: string, ch
   <script>window.__DAPPSTER__=${runtime};</script>
   <script>
     ${evmCompatibility}
+    ${solanaCompatibility}
     if (window.solanaWeb3) Object.assign(window, window.solanaWeb3);
   </script>
   <script type="text/babel" data-presets="env,react,typescript" data-filename="App.tsx">
+    ${chain === "solana" ? wrapSolanaBabelSource(`
     const { useCallback, useEffect, useMemo, useRef, useState } = React;
-    ${prepared.source}
+    ${preparedSource}
     const root = ReactDOM.createRoot(document.getElementById("root"));
     root.render(React.createElement(${prepared.componentName}));
+    `) : `
+    const { useCallback, useEffect, useMemo, useRef, useState } = React;
+    ${preparedSource}
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(React.createElement(${prepared.componentName}));
+    `}
   </script>
 </body>
 </html>`
