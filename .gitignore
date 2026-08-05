@@ -14,6 +14,7 @@ out
 .edge-headless-base/
 tmp/
 output/
+public/runtime/solana-runtime.js
 tsconfig.tsbuildinfo
 .cargo-target
 contracts/**/target
