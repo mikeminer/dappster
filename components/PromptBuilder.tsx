@@ -269,19 +269,39 @@ function transactionMatchesFunding(transaction: ParsedTransactionWithMeta | null
 
 async function recoverConfirmedSolanaFunding(connection: Connection, quote: SolanaDeploymentQuote, wallet: PublicKey) {
   const payer = new PublicKey(quote.payer)
-  const recent = await connection.getSignaturesForAddress(payer, { limit: 25 }, "confirmed")
+  const retryRead = async <T,>(operation: () => Promise<T>) => {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await operation()
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        if (!/(?:\b429\b|too many requests|rate[ -]?limit)/i.test(message) || attempt >= 6) throw error
+        const delayMs = Math.min(10_000, 750 * (2 ** attempt)) + Math.floor(Math.random() * 250)
+        await new Promise(resolve => setTimeout(resolve, delayMs))
+      }
+    }
+  }
+  const recent = await retryRead(() => connection.getSignaturesForAddress(payer, { limit: 25 }, "confirmed"))
   if (!recent.length) return null
-  const transactions = await connection.getParsedTransactions(recent.map(item => item.signature), {
-    commitment: "confirmed",
-    maxSupportedTransactionVersion: 0,
-  })
-  const index = transactions.findIndex(transaction => transactionMatchesFunding(transaction, {
-    wallet,
-    payer,
-    lamports: quote.requiredLamports,
-    memo: quote.memo,
-  }))
-  return index >= 0 ? recent[index].signature : null
+  // Public Solana RPCs frequently reject a 25-item getTransactions batch.
+  // Read small groups with exponential backoff and stop as soon as the
+  // unique funding memo is found, avoiding both duplicate transfers and 429s.
+  for (let offset = 0; offset < recent.length; offset += 5) {
+    const signatures = recent.slice(offset, offset + 5)
+    const transactions = await retryRead(() => connection.getParsedTransactions(signatures.map(item => item.signature), {
+      commitment: "confirmed",
+      maxSupportedTransactionVersion: 0,
+    }))
+    const index = transactions.findIndex(transaction => transactionMatchesFunding(transaction, {
+      wallet,
+      payer,
+      lamports: quote.requiredLamports,
+      memo: quote.memo,
+    }))
+    if (index >= 0) return signatures[index].signature
+    if (offset + 5 < recent.length) await new Promise(resolve => setTimeout(resolve, 250))
+  }
+  return null
 }
 
 export function PromptBuilder() {
