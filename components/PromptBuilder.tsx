@@ -56,10 +56,21 @@ type InjectedEvmProvider = {
   isMetaMask?: boolean
   isRabby?: boolean
   isZerion?: boolean
+  isCoinbaseWallet?: boolean
 }
 
 function isZerionProvider(provider: unknown) {
-  return Boolean((provider as InjectedEvmProvider | undefined)?.isZerion)
+  const root = provider as InjectedEvmProvider | undefined
+  return Boolean(root?.isZerion || root?.providers?.some(candidate => candidate.isZerion))
+}
+
+function prefersFactoryDeployment(connectorId: string, provider: unknown) {
+  const root = provider as InjectedEvmProvider | undefined
+  const isCoinbaseWallet = Boolean(root?.isCoinbaseWallet || root?.providers?.some(candidate => candidate.isCoinbaseWallet))
+  return connectorId === "walletConnect"
+    || /(?:zerion|coinbase)/i.test(connectorId)
+    || isZerionProvider(provider)
+    || isCoinbaseWallet
 }
 
 function selectDeploymentProvider(injected: unknown, chainId: number) {
@@ -836,7 +847,7 @@ export function PromptBuilder() {
         bytecode: compiled.bytecode,
         args,
       })
-      const useFactoryDeployment = connectedWallet.connector.id === "walletConnect" || isZerionProvider(provider)
+      const useFactoryDeployment = prefersFactoryDeployment(connectedWallet.connector.id, provider)
 
       if (useFactoryDeployment) {
         const hasOwner = compiled.abi.some(item => item.type === "function" && item.name === "owner" && item.inputs.length === 0)
