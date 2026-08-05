@@ -142,20 +142,6 @@ type ContractDeployment = EvmContractDeployment | SolanaProgramDeployment | SuiP
 
 type Deployment = { cid: string; url: string; creditsRemaining: number; status: "live" }
 type DeployStage = "quoting" | "funding" | "queued" | "compiling" | "wallet" | "confirming" | "recording" | "burning" | "pinning" | null
-type RememberedProject = {
-  id: string
-  name: string
-  description?: string
-  chain: Chain
-  contract_code?: string
-  frontend_code?: string
-  contract_address?: string
-  contract_tx_hash?: `0x${string}`
-  contract_chain_id?: number
-  contract_network?: string
-  ipfs_hash?: string
-  ipfs_url?: string
-}
 
 type PreparedGeneration = {
   dappId: string
@@ -185,6 +171,10 @@ type SavedGenerationProject = {
 const PENDING_GENERATION_KEY = "dappster-pending-generation"
 
 function rememberProject(generation: Generation, prompt: string, chain: Chain, contract?: ContractDeployment, deployment?: Deployment, targetChainId?: number, targetSolanaCluster?: "devnet" | "mainnet-beta") {
+  if (generation.mode !== "local") {
+    localStorage.removeItem("dappster-projects")
+    return
+  }
   const current = JSON.parse(localStorage.getItem("dappster-projects") || "[]") as Record<string, unknown>[]
   const project = {
     id: generation.dappId,
@@ -338,6 +328,11 @@ export function PromptBuilder() {
       try {
         const pending = JSON.parse(localStorage.getItem(PENDING_GENERATION_KEY) || "null") as PreparedGeneration | null
         if (!pending?.dappId) return
+        const workspace = await apiFetch<{ dapps?: Array<{ id: string }> }>("/api/me")
+        if (!workspace.dapps?.some(project => project.id === pending.dappId)) {
+          localStorage.removeItem(PENDING_GENERATION_KEY)
+          return
+        }
         setPrompt(pending.prompt)
         setChain(pending.chain)
         if (pending.evmChainId && getSupportedEvmChain(pending.evmChainId)) setEvmChainId(pending.evmChainId)
@@ -421,37 +416,7 @@ export function PromptBuilder() {
       }).catch(cause => setError(cause instanceof Error ? cause.message : "Saved project could not be loaded"))
       return
     }
-    try {
-      const remembered = JSON.parse(localStorage.getItem("dappster-projects") || "[]") as RememberedProject[]
-      const pending = remembered.find(project => project.frontend_code && !project.ipfs_url)
-      if (!pending) return
-      setChain(pending.chain)
-      if (pending.contract_chain_id && getSupportedEvmChain(pending.contract_chain_id)) setEvmChainId(pending.contract_chain_id)
-      setPrompt(pending.description || "Recovered deployment")
-      setGeneration({
-        dappId: pending.id,
-        name: pending.name,
-        contract: pending.contract_code || "",
-        frontend: pending.frontend_code!,
-        deployInstructions: "Recovered from this browser after the contract was confirmed on-chain.",
-        warnings: [],
-        creditsRemaining: null,
-        mode: "local",
-      })
-      if (pending.chain === "evm" && pending.contract_address && pending.contract_tx_hash && pending.contract_chain_id) {
-        setContractDeployment({ kind: "evm", address: pending.contract_address as `0x${string}`, txHash: pending.contract_tx_hash, chainId: pending.contract_chain_id, status: "confirmed" })
-      } else if (pending.chain === "solana") {
-        const cluster: SolanaDeploymentCluster = pending.contract_network === "mainnet-beta" ? "mainnet-beta" : "devnet"
-        setSolanaCluster(cluster)
-        if (pending.contract_address) setContractDeployment({ kind: "solana", address: pending.contract_address, cluster, status: "confirmed" })
-      } else if (pending.chain === "sui" && pending.contract_address && pending.contract_tx_hash) {
-        setContractDeployment({ kind: "sui", address: pending.contract_address, txHash: pending.contract_tx_hash, network: "testnet", status: "confirmed" })
-      } else if (pending.chain === "aptos" && pending.contract_address && /^0x[0-9a-fA-F]{64}$/.test(pending.contract_tx_hash || "")) {
-        setContractDeployment({ kind: "aptos", address: pending.contract_address, txHash: pending.contract_tx_hash as `0x${string}`, network: "devnet", status: "confirmed" })
-      }
-    } catch {
-      localStorage.removeItem("dappster-projects")
-    }
+    localStorage.removeItem("dappster-projects")
   }, [setSolanaCluster])
 
   function applyRecoveredGeneration(project: SavedGenerationProject, pending: PreparedGeneration) {
@@ -510,7 +475,14 @@ export function PromptBuilder() {
     try {
       const creditBurn = await burnCreditsFromUserWallet(5, `${requestedChain} dApp generation`)
       if (controller.signal.aborted) throw new DOMException("Generation canceled", "AbortError")
-      const savedPending = JSON.parse(localStorage.getItem(PENDING_GENERATION_KEY) || "null") as PreparedGeneration | null
+      let savedPending = JSON.parse(localStorage.getItem(PENDING_GENERATION_KEY) || "null") as PreparedGeneration | null
+      if (savedPending?.dappId) {
+        const workspace = await apiFetch<{ dapps?: Array<{ id: string }> }>("/api/me")
+        if (!workspace.dapps?.some(project => project.id === savedPending?.dappId)) {
+          localStorage.removeItem(PENDING_GENERATION_KEY)
+          savedPending = null
+        }
+      }
       if (savedPending?.dappId) {
         if (savedPending.prompt !== requestedPrompt || savedPending.chain !== requestedChain || savedPending.evmChainId !== requestedEvmChainId) {
           throw new Error("Another generation is still pending. Wait for Dappster to recover it before starting a different project.")

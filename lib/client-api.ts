@@ -24,6 +24,8 @@ export function setLocalWalletSession(session: LocalWalletSession) {
 export function clearLocalWalletSession() {
   localStorage.removeItem(WALLET_SESSION_KEY)
   localStorage.removeItem(DEMO_USER_KEY)
+  localStorage.removeItem("dappster-projects")
+  localStorage.removeItem("dappster-pending-generation")
   window.dispatchEvent(new Event("dappster-auth-change"))
 }
 
