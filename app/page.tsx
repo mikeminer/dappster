@@ -1,14 +1,14 @@
 import Link from "next/link"
 import { ArrowRight, Bot, Check, CloudUpload, Code2, Flame, ShieldCheck, Sparkles, Wallet } from "lucide-react"
 import { DappCard } from "@/components/DappCard"
-import { UsdcCheckoutButton } from "@/components/UsdcCheckoutButton"
+import { UsdcCheckoutIsland } from "@/components/UsdcCheckoutIsland"
 import { toDappCard } from "@/lib/dapp-card-data"
-import { getPublicDapps } from "@/lib/public-dapps"
+import { getCachedPublicDapps } from "@/lib/public-dapps"
 
-export const dynamic = "force-dynamic"
+export const revalidate = 3600
 
 export default async function Home() {
-  const publishedDapps = await getPublicDapps({ limit: 3 })
+  const publishedDapps = await getCachedPublicDapps({ limit: 3 })
     .then(result => result.dapps.map(toDappCard))
     .catch(() => [])
   return (
@@ -50,9 +50,9 @@ export default async function Home() {
         <div className="container">
           <div className="section-heading"><div><div className="section-label">// Credits and membership</div><h2 className="section-title">Build more. Pay less.</h2></div><p className="section-copy">Buy Dappster Credits or activate Pro, paying exclusively in USDC on Base. No card required.</p></div>
           <div className="pricing-grid">
-            <article className="price-card"><div className="price-name">Just Check</div><div className="price">5 <small>USDC</small></div><p>Buy 50 Dappster Credits for exploring ideas and shipping your first dApp.</p><ul className="feature-list"><li>50 credits</li><li>10 AI generations</li><li>Public Marketplace listing</li><li>EVM and Solana support</li></ul><UsdcCheckoutButton packageId="starter" className="btn btn-outline btn-block" label="Buy 50 credits" /></article>
-            <article className="price-card featured"><div className="popular">MOST POPULAR</div><div className="price-name">Builder</div><div className="price">25 <small>USDC</small></div><p>Buy 300 Dappster Credits for serious shipping.</p><ul className="feature-list"><li>60 AI generations</li><li>12 premium audits</li><li>IPFS deployments</li><li>USDC payment on Base</li></ul><UsdcCheckoutButton packageId="builder" className="btn btn-primary btn-block" label="Buy 300 credits" /></article>
-            <article className="price-card"><div className="price-name">Pro</div><div className="price">39 <small>USDC / 30 days</small></div><p>Unlimited creative room for power builders. Renew from your wallet every 30 days.</p><ul className="feature-list"><li>Unlimited generations</li><li>20 premium audits / month</li><li>Featured listing credit</li><li>USDC on Base · no card</li></ul><UsdcCheckoutButton packageId="unlimited" className="btn btn-outline btn-block" label="Activate Pro" /></article>
+            <article className="price-card"><div className="price-name">Just Check</div><div className="price">5 <small>USDC</small></div><p>Buy 50 Dappster Credits for exploring ideas and shipping your first dApp.</p><ul className="feature-list"><li>50 credits</li><li>10 AI generations</li><li>Public Marketplace listing</li><li>EVM and Solana support</li></ul><UsdcCheckoutIsland packageId="starter" className="btn btn-outline btn-block" label="Buy 50 credits" /></article>
+            <article className="price-card featured"><div className="popular">MOST POPULAR</div><div className="price-name">Builder</div><div className="price">25 <small>USDC</small></div><p>Buy 300 Dappster Credits for serious shipping.</p><ul className="feature-list"><li>60 AI generations</li><li>12 premium audits</li><li>IPFS deployments</li><li>USDC payment on Base</li></ul><UsdcCheckoutIsland packageId="builder" className="btn btn-primary btn-block" label="Buy 300 credits" /></article>
+            <article className="price-card"><div className="price-name">Pro</div><div className="price">39 <small>USDC / 30 days</small></div><p>Unlimited creative room for power builders. Renew from your wallet every 30 days.</p><ul className="feature-list"><li>Unlimited generations</li><li>20 premium audits / month</li><li>Featured listing credit</li><li>USDC on Base · no card</li></ul><UsdcCheckoutIsland packageId="unlimited" className="btn btn-outline btn-block" label="Activate Pro" /></article>
           </div>
           <section className="credit-burn-guide" aria-labelledby="credit-burn-title">
             <div className="credit-burn-head">

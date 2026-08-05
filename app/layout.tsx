@@ -2,7 +2,6 @@ import type { Metadata } from "next"
 import "./globals.css"
 import { Header } from "@/components/Header"
 import { Footer } from "@/components/Footer"
-import { Web3Providers } from "@/components/WalletProvider"
 import { CreditsRequiredModal } from "@/components/CreditsRequiredModal"
 import { LauncherIntroModal } from "@/components/LauncherIntroModal"
 
@@ -24,13 +23,13 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <meta name="base:app_id" content="6a6f47882c28265d676170a5" />
       </head>
       <body>
-        <Web3Providers><div className="site-shell">
+        <div className="site-shell">
           <LauncherIntroModal />
           <CreditsRequiredModal />
           <Header />
           <main>{children}</main>
           <Footer />
-        </div></Web3Providers>
+        </div>
       </body>
     </html>
   )
