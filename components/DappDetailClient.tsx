@@ -181,7 +181,7 @@ export function DappDetailClient({ id }: { id: string }) {
   }
 
   return <>
-    <section className="page-hero"><div className="container"><Link href="/explore" className="back-link"><ArrowLeft size={14} /> Back to Marketplace</Link><div className="detail-title"><div className="dapp-icon accent-blue">{dapp.name.slice(0, 1).toUpperCase()}</div><div><div className="title-row"><h1>{dapp.name}</h1>{dapp.is_featured && <span className="eyebrow">Featured</span>}<SocialShare dappId={dapp.id} dappName={dapp.name} /></div><div className="tags"><ChainNetworkBadge chain={dapp.chain} chainId={dapp.contract_chain_id} />{(dapp.tags || []).map(tag => <span className="tag" key={tag}>{tag}</span>)}</div></div></div></div></section>
+    <section className="page-hero"><div className="container"><Link href="/explore" className="back-link"><ArrowLeft size={14} /> Back to Marketplace</Link><div className="detail-title"><div className="dapp-icon accent-blue">{dapp.name.slice(0, 1).toUpperCase()}</div><div><div className="title-row"><h1>{dapp.name}</h1>{dapp.is_featured && <span className="eyebrow">Featured</span>}<SocialShare dappId={dapp.id} dappName={dapp.name} /></div><div className="tags"><ChainNetworkBadge chain={dapp.chain} chainId={dapp.contract_chain_id} contractNetwork={dapp.contract_network} />{(dapp.tags || []).map(tag => <span className="tag" key={tag}>{tag}</span>)}</div></div></div></div></section>
     <section className="app-section"><div className="container form-stack">
       {error && <div className="error-box">{error}</div>}
       <div className="audit-layout"><div className="form-stack">
