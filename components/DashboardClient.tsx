@@ -146,7 +146,7 @@ export function DashboardClient() {
       <div><h2 style={{fontSize:20,margin:"0 0 5px"}}>Projects</h2><div style={{color:"#727a84",fontSize:12}}>Your latest AI-generated dApps.</div></div>
       <Link href="/build" className="btn btn-primary"><Plus size={15} /> New dApp</Link>
     </div>
-    <div className="panel table-wrap"><table className="table"><thead><tr><th>Project</th><th>Chain</th><th>Status</th><th>Visibility</th><th /></tr></thead><tbody>
+    <div className="panel table-wrap"><table className="table dashboard-projects-table"><thead><tr><th>Project</th><th>Chain</th><th>Status</th><th>Visibility</th><th /></tr></thead><tbody>
       {workspace?.dapps.map(project => {
         const frontendIsLive = Boolean(project.ipfs_hash || project.ipfs_url)
         const resumeLabel = project.contract_address ? "Publish frontend" : "Deploy"

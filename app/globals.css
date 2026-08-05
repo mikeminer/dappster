@@ -99,7 +99,9 @@ button { color: inherit; }
 .accent-orange { background: linear-gradient(145deg, #f0863d, #713113); }
 .accent-pink { background: linear-gradient(145deg, #e44a8c, #681e47); }
 .chain-badge, .tag { display: inline-flex; align-items: center; gap: 6px; border: 1px solid #2a2e35; border-radius: 999px; padding: 5px 9px; color: #aeb4bc; font: 10px/1 "SFMono-Regular", Consolas, monospace; text-transform: uppercase; }
-.chain-network-badge { max-width: calc(100% - 68px); min-width: 0; text-transform: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chain-network-badge { max-width: 100%; min-width: 0; text-transform: none; white-space: nowrap; }
+.chain-network-badge > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.dapp-top .chain-network-badge { max-width: calc(100% - 68px); }
 .chain-logo { display: block; width: 16px; height: 16px; border-radius: 50%; object-fit: contain; }
 .chain-dot { width: 6px; height: 6px; border-radius: 50%; background: #627eea; }
 .chain-dot.solana { background: #14f195; box-shadow: 0 0 8px rgba(20,241,149,.5); }
@@ -348,6 +350,7 @@ button { color: inherit; }
 .credits-required-modal .btn + .btn { margin-top: 8px; }
 .preview-modal { width: min(1180px, calc(100vw - 32px)); height: min(780px, calc(100vh - 32px)); display: flex; flex-direction: column; overflow: hidden; background: #101216; border: 1px solid #30353d; border-radius: 12px; box-shadow: 0 30px 100px #000; }
 .project-actions { display: flex; align-items: center; justify-content: flex-end; gap: 7px; }
+.dashboard-projects-table th:nth-child(2), .dashboard-projects-table td:nth-child(2) { min-width: 180px; }
 .project-actions > a, .project-delete-button { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid #2a2f36; border-radius: 7px; color: #aeb4bd; background: transparent; cursor: pointer; transition: color .15s ease, border-color .15s ease, background .15s ease; }
 .project-actions > .project-deploy-link { width: auto; grid-auto-flow: column; gap: 6px; padding: 0 10px; color: #050700; background: #c7ff32; border-color: #c7ff32; font-size: 10px; font-weight: 800; white-space: nowrap; }
 .project-actions > .project-deploy-link:hover { color: #050700; background: #d4ff62; border-color: #d4ff62; }
