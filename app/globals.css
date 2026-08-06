@@ -314,6 +314,7 @@ button { color: inherit; }
 .trust-line small { color: #6f7782; font-size: 10px; line-height: 1.5; margin-top: 4px; }
 
 .modal-backdrop { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; overflow-y: auto; overscroll-behavior: contain; background: rgba(0,0,0,.72); backdrop-filter: blur(6px); padding: max(20px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left)); }
+.wallet-modal-backdrop { z-index: 1000; isolation: isolate; }
 .modal { width: min(430px, 100%); max-height: calc(100dvh - 40px); overflow-y: auto; overscroll-behavior: contain; background: #101216; border: 1px solid #30353d; border-radius: 12px; box-shadow: 0 30px 100px #000; }
 .launcher-intro-backdrop { z-index: 140; background: radial-gradient(circle at 50% 25%, rgba(199,255,50,.1), transparent 38%), rgba(0,0,0,.82); }
 .launcher-intro-modal { position: relative; width: min(500px, 100%); padding: 34px; overflow: hidden; border-color: rgba(199,255,50,.3); background: linear-gradient(145deg, rgba(199,255,50,.055), transparent 38%), #0d0f12; text-align: center; }
