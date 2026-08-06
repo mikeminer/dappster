@@ -13,7 +13,7 @@ import { injectCompiledAbiIntoFrontend } from "@/lib/frontend-abi"
 import { CHAIN_IDS, getChainAdapter } from "@/lib/chain-adapters"
 export const maxDuration = 300
 
-const requestSchema = z.object({ prompt: z.string().min(12).max(4000), chain: z.enum(CHAIN_IDS), evmChainId: z.number().int().positive().optional(), includeAudit: z.boolean().optional().default(false), creditBurn: creditBurnProofSchema.optional(), dappId: z.string().uuid().optional() })
+const requestSchema = z.object({ prompt: z.string().trim().min(1).max(600), chain: z.enum(CHAIN_IDS), evmChainId: z.number().int().positive().optional(), includeAudit: z.boolean().optional().default(false), creditBurn: creditBurnProofSchema.optional(), dappId: z.string().uuid().optional() })
 
 export async function POST(request: Request) {
   try {
