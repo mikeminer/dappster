@@ -579,7 +579,7 @@ export function PromptBuilder() {
       } else {
         const created = await apiFetch<Array<{ id: string }>>("/api/dapps", {
           method: "POST",
-          body: JSON.stringify({ name: "Generating dApp", description: requestedPrompt, chain: requestedChain, tags: [] }),
+          body: JSON.stringify({ name: "Generating dApp", description: requestedPrompt, chain: requestedChain, contract_network: requestedSolanaCluster, tags: [] }),
           signal: controller.signal,
         })
         if (!created[0]?.id) throw new Error("Dappster could not prepare a recoverable generation")
