@@ -219,8 +219,12 @@ export function wrapSolanaBabelSource(source: string) {
       ${source}
     }).catch(function (error) {
       console.error("[Dappster Solana runtime]", error);
-      const root = document.getElementById("root");
-      if (root) root.innerHTML = '<div class="boot" style="padding:24px;text-align:center">Unable to load the Solana runtime. Reload the dApp and try again.</div>';
+      if (window.__DAPPSTER_PREVIEW__?.fail) {
+        window.__DAPPSTER_PREVIEW__.fail(error);
+      } else {
+        const root = document.getElementById("root");
+        if (root) root.innerHTML = '<div class="boot" style="padding:24px;text-align:center">Unable to load the Solana runtime. Reload the dApp and try again.</div>';
+      }
     });
   `
 }

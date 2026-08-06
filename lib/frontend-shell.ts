@@ -30,6 +30,78 @@ function evmRuntimeChain(chainId?: number) {
   }
 }
 
+function buildPreviewDiagnosticsScript(chain: string) {
+  const requiredGlobals = chain === "solana"
+    ? [["React", "React"], ["ReactDOM", "React DOM"], ["Babel", "Babel"], ["__DAPPSTER_SOLANA_RUNTIME__", "Solana runtime"]]
+    : [["React", "React"], ["ReactDOM", "React DOM"], ["Babel", "Babel"]]
+  const encodedGlobals = JSON.stringify(requiredGlobals).replace(/</g, "\\u003c")
+  return `
+    (function () {
+      const requiredGlobals = ${encodedGlobals};
+      let settled = false;
+      let timeoutId;
+      const root = () => document.getElementById("root");
+      const messageOf = value => {
+        if (!value) return "Unknown preview error";
+        if (typeof value === "string") return value;
+        return value.message || value.reason || String(value);
+      };
+      const notifyParent = (type, message) => {
+        try { window.parent.postMessage({ source: "dappster-preview", type, message }, "*"); } catch {}
+      };
+      const showError = value => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeoutId);
+        const message = messageOf(value);
+        const container = root();
+        if (container) {
+          container.replaceChildren();
+          const panel = document.createElement("section");
+          panel.className = "preview-error";
+          const eyebrow = document.createElement("div");
+          eyebrow.className = "preview-error-eyebrow";
+          eyebrow.textContent = "PREVIEW ERROR";
+          const title = document.createElement("h1");
+          title.textContent = "The dApp could not start";
+          const detail = document.createElement("pre");
+          detail.textContent = message;
+          const hint = document.createElement("p");
+          hint.textContent = "Retry the preview. If it still fails, regenerate the frontend using the error above.";
+          const retry = document.createElement("button");
+          retry.type = "button";
+          retry.textContent = "Retry preview";
+          retry.addEventListener("click", () => window.location.reload());
+          panel.append(eyebrow, title, detail, hint, retry);
+          container.append(panel);
+        }
+        notifyParent("error", message);
+      };
+      window.__DAPPSTER_PREVIEW__ = {
+        fail: showError,
+        ready: () => {
+          if (settled) return;
+          settled = true;
+          window.clearTimeout(timeoutId);
+          notifyParent("ready", "Preview ready");
+        },
+      };
+      window.addEventListener("error", event => showError(event.error || event.message));
+      window.addEventListener("unhandledrejection", event => showError(event.reason));
+      window.addEventListener("load", () => {
+        const missing = requiredGlobals.filter(([globalName]) => !window[globalName]).map(([, label]) => label);
+        if (missing.length) showError("Required preview dependency failed to load: " + missing.join(", "));
+      });
+      timeoutId = window.setTimeout(() => {
+        const container = root();
+        if (container && container.querySelector(".boot")) {
+          showError("The generated frontend did not render within 20 seconds.");
+        }
+      }, 20000);
+    })();
+  `
+}
+
 export function buildEvmRuntimeCompatibilityScript(contractAbi?: Abi, chainId?: number) {
   const abiAssignment = contractAbi
     ? { abi: contractAbi, evmChain: evmRuntimeChain(chainId) }
@@ -219,6 +291,10 @@ export function buildHTMLShell(frontendCode: string, contractAddress: string, ch
   const runtime = JSON.stringify({ contractAddress, chain, preview, abi: contractAbi || null, evmChain: chain === "evm" ? evmRuntimeChain(evmChainId) : undefined }).replace(/</g, "\\u003c")
   const evmCompatibility = buildEvmRuntimeCompatibilityScript(contractAbi, chain === "evm" ? evmChainId : undefined)
   const solanaCompatibility = buildSolanaRuntimeCompatibilityScript(solanaIdl)
+  const previewDiagnostics = preview ? buildPreviewDiagnosticsScript(chain) : ""
+  const previewReady = preview
+    ? `requestAnimationFrame(() => requestAnimationFrame(() => window.__DAPPSTER_PREVIEW__?.ready()));`
+    : ""
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -230,12 +306,18 @@ export function buildHTMLShell(frontendCode: string, contractAddress: string, ch
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
-  ${chain === "solana" ? '<script src="/runtime/solana-runtime.js"></script>' : ""}
+  ${chain === "solana" ? '<script src="https://dappster.fun/runtime/solana-runtime.js"></script>' : ""}
   <script src="https://unpkg.com/@babel/standalone@7.26.2/babel.min.js"></script>
   <style>
     html,body,#root{min-height:100%;margin:0}
     body{background:#09090b;color:#fafafa;font-family:Arial,sans-serif}
     .boot{display:grid;min-height:100vh;place-items:center;color:#a1a1aa}
+    .preview-error{box-sizing:border-box;display:flex;min-height:100vh;max-width:760px;margin:auto;padding:clamp(28px,7vw,72px);flex-direction:column;justify-content:center;gap:14px}
+    .preview-error-eyebrow{color:#c7ff32;font:700 12px/1.2 monospace;letter-spacing:.12em}
+    .preview-error h1{margin:0;font-size:clamp(28px,6vw,52px);line-height:1.02}
+    .preview-error pre{overflow:auto;margin:0;padding:16px;border:1px solid #3f3f46;border-radius:12px;background:#111216;color:#fda4af;white-space:pre-wrap;word-break:break-word;font:13px/1.5 monospace}
+    .preview-error p{margin:0;color:#a1a1aa;line-height:1.55}
+    .preview-error button{align-self:flex-start;padding:11px 16px;border:0;border-radius:9px;background:#c7ff32;color:#080a08;font-weight:800;cursor:pointer}
     #dappster-built-with{
       position:fixed!important;
       right:16px!important;
@@ -277,6 +359,7 @@ export function buildHTMLShell(frontendCode: string, contractAddress: string, ch
     </span>
     <span>Built with dappster<span class="dappster-dot">.</span>fun</span>
   </a>
+  ${preview ? `<script>${previewDiagnostics}</script>` : ""}
   <script>window.__DAPPSTER__=${runtime};</script>
   <script>
     ${evmCompatibility}
@@ -289,11 +372,13 @@ export function buildHTMLShell(frontendCode: string, contractAddress: string, ch
     ${preparedSource}
     const root = ReactDOM.createRoot(document.getElementById("root"));
     root.render(React.createElement(${prepared.componentName}));
+    ${previewReady}
     `) : `
     const { useCallback, useEffect, useMemo, useRef, useState } = React;
     ${preparedSource}
     const root = ReactDOM.createRoot(document.getElementById("root"));
     root.render(React.createElement(${prepared.componentName}));
+    ${previewReady}
     `}
   </script>
 </body>
