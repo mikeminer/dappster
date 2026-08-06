@@ -269,10 +269,12 @@ function transactionMatchesFunding(transaction: ParsedTransactionWithMeta | null
 
 async function recoverConfirmedSolanaFunding(connection: Connection, quote: SolanaDeploymentQuote, wallet: PublicKey) {
   const payer = new PublicKey(quote.payer)
-  const retryRead = async <T,>(operation: () => Promise<T>) => {
+  const rpcConnections = Array.from(new Set([connection.rpcEndpoint, clusterApiUrl(quote.cluster)]))
+    .map(endpoint => endpoint === connection.rpcEndpoint ? connection : new Connection(endpoint, "confirmed"))
+  const retryRead = async <T,>(operation: (rpc: Connection) => Promise<T>) => {
     for (let attempt = 0; ; attempt += 1) {
       try {
-        return await operation()
+        return await operation(rpcConnections[attempt % rpcConnections.length])
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         if (!/(?:\b429\b|too many requests|rate[ -]?limit)/i.test(message) || attempt >= 6) throw error
@@ -281,25 +283,23 @@ async function recoverConfirmedSolanaFunding(connection: Connection, quote: Sola
       }
     }
   }
-  const recent = await retryRead(() => connection.getSignaturesForAddress(payer, { limit: 25 }, "confirmed"))
+  const recent = await retryRead(rpc => rpc.getSignaturesForAddress(payer, { limit: 25 }, "confirmed"))
   if (!recent.length) return null
-  // Public Solana RPCs frequently reject a 25-item getTransactions batch.
-  // Read small groups with exponential backoff and stop as soon as the
-  // unique funding memo is found, avoiding both duplicate transfers and 429s.
-  for (let offset = 0; offset < recent.length; offset += 5) {
-    const signatures = recent.slice(offset, offset + 5)
-    const transactions = await retryRead(() => connection.getParsedTransactions(signatures.map(item => item.signature), {
+
+  // getSignaturesForAddress already returns each transaction memo. Use the
+  // unique deployment memo to select one signature instead of downloading up
+  // to 25 transactions, which public RPCs frequently reject with HTTP 429.
+  for (const candidate of recent.filter(item => item.memo === quote.memo)) {
+    const transaction = await retryRead(rpc => rpc.getParsedTransaction(candidate.signature, {
       commitment: "confirmed",
       maxSupportedTransactionVersion: 0,
     }))
-    const index = transactions.findIndex(transaction => transactionMatchesFunding(transaction, {
+    if (transactionMatchesFunding(transaction, {
       wallet,
       payer,
       lamports: quote.requiredLamports,
       memo: quote.memo,
-    }))
-    if (index >= 0) return signatures[index].signature
-    if (offset + 5 < recent.length) await new Promise(resolve => setTimeout(resolve, 250))
+    })) return candidate.signature
   }
   return null
 }

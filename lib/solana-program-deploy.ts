@@ -318,12 +318,21 @@ export async function verifySolanaDeployFunding(input: {
   const wallet = new PublicKey(input.wallet)
   const connection = new Connection(rpcUrl(input.cluster), { commitment: "confirmed", confirmTransactionInitialTimeout: 120_000 })
   const deadline = Date.now() + 90_000
-  let transaction = await connection.getParsedTransaction(input.signature, { commitment: "confirmed", maxSupportedTransactionVersion: 0 })
+  let transaction = await retryRpcRateLimit(
+    () => connection.getParsedTransaction(input.signature, { commitment: "confirmed", maxSupportedTransactionVersion: 0 }),
+    "SOL funding transaction lookup",
+  )
   while (!transaction && Date.now() < deadline) {
-    const status = (await connection.getSignatureStatuses([input.signature], { searchTransactionHistory: true })).value[0]
+    const status = (await retryRpcRateLimit(
+      () => connection.getSignatureStatuses([input.signature], { searchTransactionHistory: true }),
+      "SOL funding signature status",
+    )).value[0]
     if (status?.err) throw new Error("The SOL funding transaction failed and was not charged. Try deployment again.")
     await new Promise(resolve => setTimeout(resolve, 2_000))
-    transaction = await connection.getParsedTransaction(input.signature, { commitment: "confirmed", maxSupportedTransactionVersion: 0 })
+    transaction = await retryRpcRateLimit(
+      () => connection.getParsedTransaction(input.signature, { commitment: "confirmed", maxSupportedTransactionVersion: 0 }),
+      "SOL funding transaction lookup",
+    )
   }
   if (!transaction) throw new Error("The SOL funding transaction is not confirmed yet. Retry deployment without sending SOL again.")
   if (transaction.meta?.err) throw new Error("The SOL funding transaction failed and was not charged. Try deployment again.")
