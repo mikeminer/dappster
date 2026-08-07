@@ -2,12 +2,14 @@ import { NextResponse } from "next/server"
 import { z } from "zod"
 import { getRequestUser } from "@/lib/runtime"
 import { accountHasWallet, getAccountWallets } from "@/lib/accounts"
+import { getAccountPoints } from "@/lib/dappster-points"
 
 export async function GET(request: Request) {
   try {
     const user = await getRequestUser(request)
     if (user.isDemo) return NextResponse.json({ accountId: user.id, wallets: [] })
-    return NextResponse.json({ accountId: user.id, wallets: await getAccountWallets(user.id) })
+    const [wallets, points] = await Promise.all([getAccountWallets(user.id), getAccountPoints(user.id)])
+    return NextResponse.json({ accountId: user.id, wallets, dappsterPoints: points?.points || 0 })
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Could not load linked wallets" }, { status: 401 })
   }

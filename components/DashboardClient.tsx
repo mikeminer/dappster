@@ -11,7 +11,7 @@ import type { Chain } from "@/types"
 
 type Project = { id: string; name: string; description?: string; chain: Chain; tags?: string[]; contract_address?: string; contract_tx_hash?: string; contract_chain_id?: number | null; contract_network?: "devnet" | "mainnet-beta" | null; deploy_status?: string; ipfs_hash?: string; ipfs_url?: string; is_listed?: boolean; audit_status?: string; updated_at?: string }
 type CreditTransaction = { id: string; amount: number; type: "purchase" | "spend" | "bonus"; description?: string | null; created_at: string }
-type Workspace = { profile: { credits: number; plan: string; plan_expires_at?: string | null; username?: string }; dapps: Project[]; creditTransactions?: CreditTransaction[]; marketplace?: { sales: number; creatorRevenueUsdc: number }; mode: "local" | "supabase" }
+type Workspace = { profile: { credits: number; plan: string; plan_expires_at?: string | null; username?: string; dappsterPoints?: number }; dapps: Project[]; creditTransactions?: CreditTransaction[]; marketplace?: { sales: number; creatorRevenueUsdc: number }; mode: "local" | "supabase" }
 
 const DELETE_CONFIRMATION = "I PERMANENTLY DELETE THIS CREATION"
 
@@ -137,6 +137,7 @@ export function DashboardClient() {
     {error && <div className="error-box" style={{marginBottom:16}}>{error}</div>}
     <div className="stats-grid">
       <div className="stat"><div className="stat-label">Available credits</div><div className="stat-value acid">{workspace?.profile.credits ?? 0}</div></div>
+      <div className="stat"><div className="stat-label">Dappster Points</div><div className="stat-value">{workspace?.profile.dappsterPoints ?? 0}</div><Link className="stat-link" href="/leaderboard">View leaderboard</Link></div>
       <div className="stat"><div className="stat-label">Total projects</div><div className="stat-value">{workspace?.dapps.length ?? 0}</div></div>
       <div className="stat"><div className="stat-label">Live deployments</div><div className="stat-value">{liveCount}</div></div>
       <div className="stat"><div className="stat-label">Creator revenue</div><div className="stat-value">{workspace?.marketplace?.creatorRevenueUsdc?.toFixed(2) || "0.00"} <small>USDC</small></div></div>

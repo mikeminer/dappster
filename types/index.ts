@@ -9,6 +9,8 @@ export interface Dapp {
   contractNetwork?: string | null
   tags: string[]
   owner: string
+  ownerUsername?: string
+  ownerPoints?: number
   icon: string
   accent: string
   isFeatured?: boolean
