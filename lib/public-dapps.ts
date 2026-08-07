@@ -6,6 +6,7 @@ import { hasSupabaseConfig } from "@/lib/runtime"
 import { supabaseRequest } from "@/lib/supabase"
 import type { Chain } from "@/types"
 import { isChain } from "@/lib/chain-adapters"
+import { getDappsterPointsSnapshot } from "@/lib/dappster-points"
 
 export type PublicDapp = Record<string, unknown> & {
   id: string
@@ -18,6 +19,8 @@ export type PublicDapp = Record<string, unknown> & {
   tags?: string[]
   is_featured?: boolean
   publisher_name?: string
+  publisher_username?: string | null
+  publisher_points?: number
   ipfs_hash?: string
   ipfs_url?: string
 }
@@ -82,17 +85,19 @@ export async function getPublicDapps({ page = 1, limit = 12, chain, featured, ta
   const hasMore = fetchedRows.length > safeLimit
   const rows = fetchedRows.slice(0, safeLimit)
   const ownerIds = Array.from(new Set(rows.map(dapp => String(dapp.owner_id || "")).filter(Boolean)))
-  const [profiles, wallets] = ownerIds.length ? await Promise.all([
+  const [profiles, wallets, pointsSnapshot] = ownerIds.length ? await Promise.all([
     supabaseRequest<Array<{ id: string; username?: string | null }>>({ path: "profiles", query: { id: `in.(${ownerIds.join(",")})`, select: "id,username" } }),
     supabaseRequest<Array<{ account_id: string; wallet_address: string; chain: string }>>({ path: "account_wallets", query: { account_id: `in.(${ownerIds.join(",")})`, select: "account_id,wallet_address,chain" } }),
-  ]) : [[], []]
+    getDappsterPointsSnapshot(),
+  ]) : [[], [], { entries: [] }]
   const usernames = new Map(profiles.map(profile => [profile.id, profile.username]))
+  const pointsByOwner = new Map(pointsSnapshot.entries.map(entry => [entry.accountId, entry.points]))
   const dapps = rows.map(dapp => {
     const ownerId = String(dapp.owner_id || "")
     const wallet = wallets.find(item => item.account_id === ownerId && item.chain === dapp.chain)
     const publisher_name = formatPublisher({ username: usernames.get(ownerId), wallet_address: wallet?.wallet_address }, ownerId)
     const visible = dapp.app_visibility === false ? { ...dapp, ipfs_hash: undefined, ipfs_url: undefined } : dapp
-    return { ...visible, publisher_name }
+    return { ...visible, publisher_name, publisher_username: usernames.get(ownerId) || null, publisher_points: pointsByOwner.get(ownerId) || 0 }
   })
   return { dapps: dapps as PublicDapp[], page: safePage, limit: safeLimit, hasMore }
 }

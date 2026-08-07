@@ -8,6 +8,7 @@ import { supabaseRequest } from "@/lib/supabase"
 import { listPublicDappListings, savePublicDappListing } from "@/lib/pinata-listings"
 import { marketplaceAssets, type AssetVisibility, type MarketplaceAsset } from "@/lib/marketplace"
 import { formatPublisher } from "@/lib/publisher"
+import { getAccountPoints } from "@/lib/dappster-points"
 
 type StoredDapp = Record<string, unknown> & {
   id: string
@@ -46,9 +47,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const isOwner = Boolean(user && dapp?.owner_id === user.id)
     if (!dapp || (!dapp.is_listed && !isOwner)) return NextResponse.json({ error: "dApp not found" }, { status: 404 })
 
-    const [publisherProfiles, publisherWallets] = await Promise.all([
+    const [publisherProfiles, publisherWallets, publisherPoints] = await Promise.all([
       supabaseRequest<Array<{ username?: string | null }>>({ path: "profiles", query: { id: `eq.${dapp.owner_id}`, select: "username", limit: "1" } }),
       supabaseRequest<Array<{ wallet_address: string; chain: string }>>({ path: "account_wallets", query: { account_id: `eq.${dapp.owner_id}`, select: "wallet_address,chain" } }),
+      getAccountPoints(dapp.owner_id),
     ])
     const publisherWallet = publisherWallets.find(wallet => wallet.chain === dapp.chain)
     const publisherName = formatPublisher({ username: publisherProfiles[0]?.username, wallet_address: publisherWallet?.wallet_address }, dapp.owner_id)
@@ -73,6 +75,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       ...((isOwner || app_visibility !== false) && (ipfs_hash || ipfs_url) ? { ipfs_hash, ipfs_url } : {}),
       app_visibility: app_visibility !== false,
       publisher_name: publisherName,
+      publisher_username: publisherProfiles[0]?.username || null,
+      publisher_points: publisherPoints?.points || 0,
       ...(marketplace.audit.unlocked && latestAudit ? { audit_report: latestAudit.report, audit_created_at: latestAudit.created_at } : {}),
       ...(isOwner ? { base_payout_address, solana_payout_address } : {}),
       marketplace,

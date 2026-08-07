@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { revalidateTag } from "next/cache"
 import { z } from "zod"
 import { CREDIT_COSTS, assertCredits, hasActivePro } from "@/lib/credits"
 import { creditBurnProofSchema, verifyAndSpendCreditBurn } from "@/lib/credit-burn"
@@ -92,6 +93,7 @@ export async function POST(request: Request) {
       const deployed = await deployFrontendToIPFS(input.dappId, frontendCode, contractAddress, chain, contractAbi, evmChainId)
       if (user.isDemo && localDapp) localUpdateDapp(input.dappId, { ipfs_hash: deployed.cid, ipfs_url: deployed.url, deploy_status: "live" })
       else if (!user.isDemo) await supabaseRequest({ path: "dapps", method: "PATCH", query: { id: `eq.${input.dappId}`, owner_id: `eq.${user.id}` }, body: { ipfs_hash: deployed.cid, ipfs_url: deployed.url, deploy_status: "live", updated_at: new Date().toISOString() } })
+      revalidateTag("public-dapps")
       return NextResponse.json({ dappId: input.dappId, status: "live", ...deployed, creditsRemaining, mode: user.isDemo ? "local" : "supabase" })
     } catch (error) {
       if (user.isDemo && localDapp) localUpdateDapp(input.dappId, { deploy_status: "failed" })

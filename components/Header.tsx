@@ -9,6 +9,7 @@ import { ConnectWalletIsland } from "./ConnectWalletIsland"
 const links = [
   ["/build", "Build"],
   ["/explore", "Marketplace"],
+  ["/leaderboard", "Leaderboard"],
   ["/audit", "Audit"],
   ["/#pricing", "Pricing"],
 ]
