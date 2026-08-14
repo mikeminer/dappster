@@ -15,7 +15,8 @@
     "qa:evm": "node scripts/qa-evm-deployments.mjs",
     "qa:solidity-targets": "node --no-warnings --experimental-strip-types scripts/qa-solidity-targets.mts",
     "qa:evm-wallets": "node scripts/qa-evm-wallet-requests.mjs",
-    "qa:evm-factory": "node scripts/verify-deployment-factory.mjs"
+    "qa:evm-factory": "node scripts/verify-deployment-factory.mjs",
+    "qa:tester-tiers": "node --no-warnings --experimental-strip-types scripts/qa-tester-tiers.mts"
   },
   "dependencies": {
     "@coral-xyz/anchor": "0.30.1",

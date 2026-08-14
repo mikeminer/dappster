@@ -136,6 +136,12 @@ button { color: inherit; }
 .feature-list { list-style: none; padding: 0; margin: 25px 0 30px; display: grid; gap: 13px; color: #b2b7bf; font-size: 13px; }
 .feature-list li::before { content: "✓"; color: var(--acid); margin-right: 10px; }
 .price-card .btn { margin-top: auto; }
+.tester-tier-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 18px; }
+.tester-tier-card { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; padding: 26px 30px; border: 1px solid rgba(199,255,50,.35); border-radius: 8px; background: linear-gradient(120deg, rgba(199,255,50,.08), rgba(9,11,13,.92) 52%); }
+.tester-tier-card > div { min-width: 0; }
+.tester-tier-card h3 { margin: 8px 0 7px; color: #eef1f5; font-size: 24px; font-weight: 600; letter-spacing: -.03em; }
+.tester-tier-card p { max-width: 820px; margin: 0; color: #8c949e; font-size: 13px; line-height: 1.7; }
+.tester-tier-card .btn { flex: 0 0 auto; }
 .credit-burn-guide { margin-top: 26px; border: 1px solid var(--line); background: linear-gradient(145deg, rgba(199,255,50,.035), rgba(9,11,13,.9) 42%); }
 .credit-burn-head { display: grid; grid-template-columns: minmax(260px,.8fr) minmax(320px,1.2fr); gap: 40px; align-items: end; padding: 30px 32px; border-bottom: 1px solid var(--line); }
 .credit-burn-head h3 { margin: 9px 0 0; color: #eef1f5; font-size: 27px; font-weight: 500; letter-spacing: -.03em; }
@@ -493,6 +499,9 @@ button { color: inherit; }
   .feature-grid, .pricing-grid { grid-template-columns: 1fr; }
   .feature, .price-card { border-right: 0; border-bottom: 1px solid var(--line); }
   .feature:last-child, .price-card:last-child { border-bottom: 0; }
+  .tester-tier-grid { grid-template-columns: 1fr; }
+  .tester-tier-card { align-items: flex-start; flex-direction: column; padding: 24px 22px; }
+  .tester-tier-card .btn { width: 100%; }
   .credit-burn-head { grid-template-columns: 1fr; gap: 14px; padding: 25px 22px; }
   .credit-burn-rules { grid-template-columns: 1fr; }
   .credit-burn-rules > div { border-right: 0; border-bottom: 1px solid var(--line); }

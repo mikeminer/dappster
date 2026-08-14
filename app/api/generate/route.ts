@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { callAI } from "@/lib/ai"
-import { assertCredits, CREDIT_COSTS, getCredits, hasActivePro } from "@/lib/credits"
+import { CREDIT_COSTS, getCredits, hasActivePro } from "@/lib/credits"
 import { creditBurnProofSchema, verifyAndSpendCreditBurn } from "@/lib/credit-burn"
 import { enforceRateLimit } from "@/lib/rate-limit"
 import { getRequestUser } from "@/lib/runtime"
@@ -11,6 +11,8 @@ import { getSupportedEvmChain } from "@/lib/evm-chains"
 import { compileSolidity } from "@/lib/solidity"
 import { injectCompiledAbiIntoFrontend } from "@/lib/frontend-abi"
 import { CHAIN_IDS, getChainAdapter } from "@/lib/chain-adapters"
+import { getSolanaTesterEntitlement } from "@/lib/pasta-developer-tier"
+import { getEvmTesterEntitlement } from "@/lib/pappardelle-tester-tier"
 export const maxDuration = 300
 
 const requestSchema = z.object({ prompt: z.string().trim().min(1).max(600), chain: z.enum(CHAIN_IDS), evmChainId: z.number().int().positive().optional(), includeAudit: z.boolean().optional().default(false), creditBurn: creditBurnProofSchema.optional(), dappId: z.string().uuid().optional() })
@@ -19,12 +21,14 @@ export async function POST(request: Request) {
   try {
     const user = await getRequestUser(request)
     const input = requestSchema.parse(await request.json())
-    const profile = user.isDemo
-      ? { credits: localCredits(user.id), plan: "free" }
-      : input.creditBurn ? await getCredits(user.id) : await assertCredits(user.id, CREDIT_COSTS.generate)
+    const profile = user.isDemo ? { credits: localCredits(user.id), plan: "free" } : await getCredits(user.id)
     const activePro = hasActivePro(profile)
-    if (!activePro && profile.credits < CREDIT_COSTS.generate && !input.creditBurn) throw new Error(`You need ${CREDIT_COSTS.generate} credits for this action`)
-    enforceRateLimit(`generate:${user.id}`, activePro ? 60 : 10)
+    const solanaTester = !user.isDemo && input.chain === "solana" ? await getSolanaTesterEntitlement(user.id) : null
+    const evmTester = !user.isDemo && input.chain === "evm" ? await getEvmTesterEntitlement(user.id) : null
+    const testerAccessMode = solanaTester?.eligible ? "solana-tester" : evmTester?.eligible ? "evm-tester" : null
+    const unlimitedGeneration = activePro || Boolean(testerAccessMode)
+    if (!unlimitedGeneration && profile.credits < CREDIT_COSTS.generate && !input.creditBurn) throw new Error(`You need ${CREDIT_COSTS.generate} credits for this action`)
+    enforceRateLimit(`generate:${user.id}`, unlimitedGeneration ? 60 : 10)
 
     const evmChain = input.chain === "evm" ? getSupportedEvmChain(input.evmChainId || 8453) : undefined
     if (input.chain === "evm" && !evmChain) throw new Error("Unsupported EVM deployment network")
@@ -51,11 +55,12 @@ export async function POST(request: Request) {
         deployInstructions: "This recovered Dappster project is ready for review and deployment.",
         warnings: [],
         creditsRemaining: profile.credits,
+        accessMode: testerAccessMode || (activePro ? "pro" : "credits"),
         mode: user.isDemo ? "local" : "supabase",
       })
     }
 
-    const creditsRemaining = activePro ? profile.credits
+    const creditsRemaining = unlimitedGeneration ? profile.credits
       : user.isDemo ? localSpend(user.id, CREDIT_COSTS.generate)
         : await verifyAndSpendCreditBurn(user.id, CREDIT_COSTS.generate, `${input.chain.toUpperCase()} dApp generation`, input.creditBurn)
 
@@ -85,7 +90,7 @@ export async function POST(request: Request) {
         ? localCreateDapp({ owner_id: user.id, name, description: input.prompt, chain: input.chain, contract_code: generation.contract, frontend_code: frontend, audit_status: "none", deploy_status: "draft", is_listed: false, is_featured: false, tags: [] }).id
         : (await supabaseRequest<{ id: string }[]>({ path: "dapps", method: "POST", body: { owner_id: user.id, name, description: input.prompt, chain: input.chain, contract_code: generation.contract, frontend_code: frontend, audit_status: "none", deploy_status: "draft" } }))[0]?.id
     }
-    return NextResponse.json({ dappId, name, contract: generation.contract, frontend, deployInstructions: generation.deployInstructions, warnings: generation.warnings, creditsRemaining, mode: user.isDemo ? "local" : "supabase" })
+    return NextResponse.json({ dappId, name, contract: generation.contract, frontend, deployInstructions: generation.deployInstructions, warnings: generation.warnings, creditsRemaining, accessMode: testerAccessMode || (activePro ? "pro" : "credits"), mode: user.isDemo ? "local" : "supabase" })
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not generate this dApp"
     const status = message.includes("Authentication") || message.includes("session") ? 401 : message.includes("credits") ? 402 : message.includes("Rate limit") ? 429 : 400
