@@ -61,7 +61,7 @@ export default async function Home() {
             </article>
             <article className="tester-tier-card">
               <div><div className="section-label">// EVM Tester tier</div><h3>Hold 50,000,000 pappardelle</h3><p>Link the qualifying EVM wallet. Unlock unlimited generations across every EVM network supported by Dappster, plus unlimited security audits.</p></div>
-              <a className="btn btn-primary" href="https://basescan.org/token/0x41859a1048fb4f8d668861b1249504bf52e6d3bd" target="_blank" rel="noreferrer">View pappardelle</a>
+              <a className="btn btn-primary" href="https://pappardellefaucet.vercel.app/" target="_blank" rel="noreferrer">Get pappardelle</a>
             </article>
           </div>
           <section className="credit-burn-guide" aria-labelledby="credit-burn-title">
