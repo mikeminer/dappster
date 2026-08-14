@@ -8,10 +8,32 @@ const IPFS_GATEWAY_TIMEOUT_MS = 12_000
 
 type FetchLike = typeof fetch
 
+function configuredPinataGateway(cid: string) {
+  const configured = process.env.PINATA_GATEWAY?.trim()
+  if (!configured) return null
+
+  try {
+    const url = new URL(/^https?:\/\//i.test(configured) ? configured : `https://${configured}`)
+    const basePath = url.pathname.replace(/\/+$/, "").replace(/\/ipfs$/i, "")
+    url.pathname = `${basePath}/ipfs/${encodeURIComponent(cid)}`
+    url.search = ""
+    url.hash = ""
+    return { name: "Configured Pinata", url: url.toString() }
+  } catch {
+    console.error("[ipfs] PINATA_GATEWAY is not a valid gateway URL")
+    return null
+  }
+}
+
 export async function fetchIpfsContent(cid: string, fetcher: FetchLike = fetch) {
   const failures: string[] = []
+  const configured = configuredPinataGateway(cid)
+  const gateways = [
+    ...(configured ? [{ name: configured.name, url: () => configured.url }] : []),
+    ...IPFS_GATEWAYS,
+  ]
   try {
-    return await Promise.any(IPFS_GATEWAYS.map(async gateway => {
+    return await Promise.any(gateways.map(async gateway => {
       try {
         const response = await fetcher(gateway.url(cid), {
           cache: "no-store",
