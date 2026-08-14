@@ -161,7 +161,7 @@ export function DappDetailClient({ id }: { id: string }) {
     try {
       setAuditing(true)
       setError("")
-      const creditBurn = await burnCreditsFromUserWallet(25, "premium deployed-contract audit")
+      const creditBurn = await burnCreditsFromUserWallet(25, `${dapp.chain} premium deployed-contract audit`)
       await apiFetch("/api/audit", { method: "POST", body: JSON.stringify({ dappId: dapp.id, contractCode: dapp.contract_code, chain: dapp.chain, tier: "premium", creditBurn }) })
       clearPendingCreditBurn(creditBurn)
       await load()

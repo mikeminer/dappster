@@ -23,7 +23,7 @@ export function AuditTool() {
     setError("")
     try {
       const cost = tier === "premium" ? 25 : 15
-      const creditBurn = await burnCreditsFromUserWallet(cost, `${tier} security audit`)
+      const creditBurn = await burnCreditsFromUserWallet(cost, `${chain} ${tier} security audit`)
       const output = await apiFetch<{ report: AuditReport; creditsRemaining: number }>("/api/audit", { method: "POST", body: JSON.stringify({ contractCode: code, chain, tier, creditBurn }) })
       clearPendingCreditBurn(creditBurn)
       setReport(output.report)
