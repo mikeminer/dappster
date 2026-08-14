@@ -2,11 +2,13 @@ import { NextResponse } from "next/server"
 import type { Abi } from "viem"
 import { injectCompiledAbiIntoFrontend } from "@/lib/frontend-abi"
 import { buildEvmRuntimeCompatibilityScript, rewritePreviewDependencies } from "@/lib/frontend-shell"
+import { fetchIpfsContent } from "@/lib/ipfs-gateway"
 import { compileSolidity } from "@/lib/solidity"
 import { supabaseRequest } from "@/lib/supabase"
 import { buildSolanaRuntimeCompatibilityScript, inferLegacySolanaIdl, replaceSolanaProgramId, wrapSolanaBabelSource } from "@/lib/solana-frontend"
 
 export const dynamic = "force-dynamic"
+export const maxDuration = 30
 
 const CID_PATTERN = /^(?:Qm[1-9A-HJ-NP-Za-km-z]{44}|b[a-z2-7]{20,})$/
 const runtimeCache = new Map<string, { abi?: Abi; chainId?: number }>()
@@ -34,13 +36,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ cid
   if (!CID_PATTERN.test(cid)) return NextResponse.json({ error: "Invalid IPFS CID" }, { status: 400 })
 
   try {
-    const upstream = await fetch(`https://dweb.link/ipfs/${encodeURIComponent(cid)}`, {
-      cache: "no-store",
-      redirect: "follow",
-    })
-    if (!upstream.ok) {
-      return NextResponse.json({ error: `IPFS content unavailable (${upstream.status})` }, { status: 502 })
-    }
+    const upstream = await fetchIpfsContent(cid)
 
     const contentType = upstream.headers.get("content-type") || "application/octet-stream"
     const headers = new Headers()
@@ -87,6 +83,6 @@ export async function GET(_request: Request, { params }: { params: Promise<{ cid
     }
     return new Response(upstream.body, { status: 200, headers })
   } catch {
-    return NextResponse.json({ error: "IPFS gateway is temporarily unavailable" }, { status: 502 })
+    return NextResponse.json({ error: "IPFS gateways are temporarily unavailable. Please retry." }, { status: 503 })
   }
 }
