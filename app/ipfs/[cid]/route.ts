@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import type { Abi } from "viem"
 import { injectCompiledAbiIntoFrontend } from "@/lib/frontend-abi"
-import { buildEvmRuntimeCompatibilityScript } from "@/lib/frontend-shell"
+import { buildEvmRuntimeCompatibilityScript, rewritePreviewDependencies } from "@/lib/frontend-shell"
 import { compileSolidity } from "@/lib/solidity"
 import { supabaseRequest } from "@/lib/supabase"
 import { buildSolanaRuntimeCompatibilityScript, inferLegacySolanaIdl, replaceSolanaProgramId, wrapSolanaBabelSource } from "@/lib/solana-frontend"
@@ -49,7 +49,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ cid
     headers.set("X-Content-Type-Options", "nosniff")
     if (contentType.includes("text/html")) {
       headers.set("Cache-Control", "no-store")
-      let html = await upstream.text()
+      let html = rewritePreviewDependencies(await upstream.text())
       let contractAbi: Abi | undefined
       let evmChainId: number | undefined
       let solanaCompatibility = buildSolanaRuntimeCompatibilityScript()

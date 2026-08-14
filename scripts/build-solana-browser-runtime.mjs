@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises"
+import { copyFile, mkdir } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { build } from "esbuild"
@@ -20,3 +20,13 @@ await build({
   banner: { js: "/* Dappster self-hosted Solana runtime */" },
   legalComments: "none",
 })
+
+const browserRuntimeAssets = [
+  ["react/umd/react.production.min.js", "react.production.min.js"],
+  ["react-dom/umd/react-dom.production.min.js", "react-dom.production.min.js"],
+  ["@babel/standalone/babel.min.js", "babel.min.js"],
+]
+
+await Promise.all(browserRuntimeAssets.map(([packagePath, outputName]) =>
+  copyFile(resolve(root, "node_modules", packagePath), resolve(outputDirectory, outputName)),
+))

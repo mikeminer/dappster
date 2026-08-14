@@ -27,7 +27,7 @@ const nextConfig = {
     return [
       { source: "/:path*", headers: commonSecurityHeaders },
       {
-        source: "/runtime/solana-runtime.js",
+        source: "/runtime/:path*",
         headers: [
           { key: "Access-Control-Allow-Origin", value: "*" },
           { key: "Cross-Origin-Resource-Policy", value: "cross-origin" },
