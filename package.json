@@ -16,12 +16,14 @@
     "qa:solidity-targets": "node --no-warnings --experimental-strip-types scripts/qa-solidity-targets.mts",
     "qa:evm-wallets": "node scripts/qa-evm-wallet-requests.mjs",
     "qa:evm-factory": "node scripts/verify-deployment-factory.mjs",
+    "qa:preview-runtime": "node scripts/qa-preview-runtime.mjs",
     "qa:tester-tiers": "node --no-warnings --experimental-strip-types scripts/qa-tester-tiers.mts"
   },
   "dependencies": {
-    "@coral-xyz/anchor": "0.30.1",
     "@aptos-labs/ts-sdk": "^5.2.1",
     "@aptos-labs/wallet-adapter-react": "^8.3.3",
+    "@babel/standalone": "7.26.2",
+    "@coral-xyz/anchor": "0.30.1",
     "@mysten/dapp-kit-core": "^1.6.12",
     "@mysten/dapp-kit-react": "^2.1.14",
     "@mysten/sui": "^2.23.1",

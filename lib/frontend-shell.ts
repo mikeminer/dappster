@@ -2,6 +2,26 @@ import type { Abi } from "viem"
 import { getSupportedEvmChain } from "@/lib/evm-chains"
 import { buildSolanaRuntimeCompatibilityScript, inferLegacySolanaIdl, replaceSolanaProgramId, wrapSolanaBabelSource } from "@/lib/solana-frontend"
 
+const DAPPSTER_RUNTIME_ORIGIN = "https://dappster.fun/runtime"
+const PREVIEW_RUNTIME_ASSETS = {
+  react: `${DAPPSTER_RUNTIME_ORIGIN}/react.production.min.js`,
+  reactDom: `${DAPPSTER_RUNTIME_ORIGIN}/react-dom.production.min.js`,
+  babel: `${DAPPSTER_RUNTIME_ORIGIN}/babel.min.js`,
+} as const
+
+const LEGACY_PREVIEW_RUNTIME_PATTERNS = [
+  [/https:\/\/unpkg\.com\/react@[^/]+\/umd\/react\.production\.min\.js/g, PREVIEW_RUNTIME_ASSETS.react],
+  [/https:\/\/unpkg\.com\/react-dom@[^/]+\/umd\/react-dom\.production\.min\.js/g, PREVIEW_RUNTIME_ASSETS.reactDom],
+  [/https:\/\/unpkg\.com\/@babel\/standalone@[^/]+\/babel\.min\.js/g, PREVIEW_RUNTIME_ASSETS.babel],
+] as const
+
+export function rewritePreviewDependencies(html: string) {
+  return LEGACY_PREVIEW_RUNTIME_PATTERNS.reduce(
+    (current, [pattern, replacement]) => current.replace(pattern, replacement),
+    html,
+  )
+}
+
 function browserReadySource(frontendCode: string) {
   const defaultFunction = frontendCode.match(/export\s+default\s+function\s+([A-Za-z_$][\w$]*)/)
   const defaultIdentifier = frontendCode.match(/export\s+default\s+([A-Za-z_$][\w$]*)\s*;?/)
@@ -303,11 +323,11 @@ export function buildHTMLShell(frontendCode: string, contractAddress: string, ch
   <meta name="color-scheme" content="dark">
   <title>Dappster dApp</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script crossorigin src="${PREVIEW_RUNTIME_ASSETS.react}"></script>
+  <script crossorigin src="${PREVIEW_RUNTIME_ASSETS.reactDom}"></script>
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
   ${chain === "solana" ? '<script src="https://dappster.fun/runtime/solana-runtime.js"></script>' : ""}
-  <script src="https://unpkg.com/@babel/standalone@7.26.2/babel.min.js"></script>
+  <script src="${PREVIEW_RUNTIME_ASSETS.babel}"></script>
   <style>
     html,body,#root{min-height:100%;margin:0}
     body{background:#09090b;color:#fafafa;font-family:Arial,sans-serif}
