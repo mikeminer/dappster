@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server"
 import type { Abi } from "viem"
 import { injectCompiledAbiIntoFrontend } from "@/lib/frontend-abi"
-import { buildEvmRuntimeCompatibilityScript, rewritePreviewDependencies } from "@/lib/frontend-shell"
+import { buildEvmRuntimeCompatibilityScript, buildHTMLShell, rewritePreviewDependencies } from "@/lib/frontend-shell"
+import { fetchIpfsContent } from "@/lib/ipfs-gateway"
 import { compileSolidity } from "@/lib/solidity"
 import { supabaseRequest } from "@/lib/supabase"
 import { buildSolanaRuntimeCompatibilityScript, inferLegacySolanaIdl, replaceSolanaProgramId, wrapSolanaBabelSource } from "@/lib/solana-frontend"
 
 export const dynamic = "force-dynamic"
+export const maxDuration = 30
 
 const CID_PATTERN = /^(?:Qm[1-9A-HJ-NP-Za-km-z]{44}|b[a-z2-7]{20,})$/
 const runtimeCache = new Map<string, { abi?: Abi; chainId?: number }>()
@@ -34,12 +36,48 @@ export async function GET(_request: Request, { params }: { params: Promise<{ cid
   if (!CID_PATTERN.test(cid)) return NextResponse.json({ error: "Invalid IPFS CID" }, { status: 400 })
 
   try {
-    const upstream = await fetch(`https://dweb.link/ipfs/${encodeURIComponent(cid)}`, {
-      cache: "no-store",
-      redirect: "follow",
-    })
-    if (!upstream.ok) {
-      return NextResponse.json({ error: `IPFS content unavailable (${upstream.status})` }, { status: 502 })
+    let upstream: Response
+    try {
+      upstream = await fetchIpfsContent(cid)
+    } catch (gatewayError) {
+      const rows = await supabaseRequest<Array<{
+        name: string
+        frontend_code: string | null
+        contract_code: string | null
+        contract_address: string | null
+        contract_chain_id: number | null
+        chain: string
+      }>>({
+        path: "dapps",
+        query: {
+          ipfs_hash: `eq.${cid}`,
+          select: "name,frontend_code,contract_code,contract_address,contract_chain_id,chain",
+          limit: "1",
+        },
+      })
+      const stored = rows[0]
+      if (!stored?.frontend_code) throw gatewayError
+
+      let storedAbi: Abi | undefined
+      if (stored.chain === "evm" && stored.contract_code) {
+        try {
+          storedAbi = compileSolidity(stored.contract_code, stored.name, {
+            chainId: stored.contract_chain_id || undefined,
+          }).abi
+        } catch {
+          // The generated frontend remains usable when legacy ABI recovery fails.
+        }
+      }
+      const html = buildHTMLShell(
+        stored.frontend_code,
+        stored.contract_address || "",
+        stored.chain,
+        false,
+        storedAbi,
+        stored.contract_chain_id || undefined,
+      )
+      console.warn("[ipfs] serving stored artifact fallback", { cid })
+      upstream = new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } })
     }
 
     const contentType = upstream.headers.get("content-type") || "application/octet-stream"
@@ -87,6 +125,6 @@ export async function GET(_request: Request, { params }: { params: Promise<{ cid
     }
     return new Response(upstream.body, { status: 200, headers })
   } catch {
-    return NextResponse.json({ error: "IPFS gateway is temporarily unavailable" }, { status: 502 })
+    return NextResponse.json({ error: "IPFS gateways are temporarily unavailable. Please retry." }, { status: 503 })
   }
 }
