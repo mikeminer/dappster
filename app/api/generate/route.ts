@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { callAI } from "@/lib/ai"
-import { assertCredits, CREDIT_COSTS, getCredits, hasActivePro } from "@/lib/credits"
-import { creditBurnProofSchema, verifyAndSpendCreditBurn } from "@/lib/credit-burn"
+import { CREDIT_COSTS, getCredits, hasActivePro } from "@/lib/credits"
+import { optionalCreditBurnProofSchema, verifyAndSpendCreditBurn } from "@/lib/credit-burn"
 import { enforceRateLimit } from "@/lib/rate-limit"
 import { getRequestUser } from "@/lib/runtime"
 import { localCreateDapp, localCredits, localGetDapp, localSpend, localUpdateDapp } from "@/lib/local-store"
@@ -13,10 +13,12 @@ import { injectCompiledAbiIntoFrontend } from "@/lib/frontend-abi"
 import { CHAIN_IDS, getChainAdapter } from "@/lib/chain-adapters"
 import { claimGenerationJob, completeGenerationJob, createOrGetGenerationJob, failGenerationJob, markGenerationJobCharged } from "@/lib/ai-generation-jobs"
 import { hydrateDappSources, storeDappSourceBundle } from "@/lib/source-storage"
+import { getSolanaTesterEntitlement } from "@/lib/pasta-developer-tier"
+import { getEvmTesterEntitlement } from "@/lib/pappardelle-tester-tier"
 
 export const maxDuration = 300
 
-const requestSchema = z.object({ prompt: z.string().min(12).max(4000), chain: z.enum(CHAIN_IDS), evmChainId: z.number().int().positive().optional(), includeAudit: z.boolean().optional().default(false), creditBurn: creditBurnProofSchema.optional(), dappId: z.string().uuid().optional() })
+const requestSchema = z.object({ prompt: z.string().min(12).max(4000), chain: z.enum(CHAIN_IDS), evmChainId: z.number().int().positive().optional(), includeAudit: z.boolean().optional().default(false), creditBurn: optionalCreditBurnProofSchema, dappId: z.string().uuid().optional() })
 
 export async function POST(request: Request) {
   try {
@@ -24,10 +26,16 @@ export async function POST(request: Request) {
     const input = requestSchema.parse(await request.json())
     const profile = user.isDemo
       ? { credits: localCredits(user.id), plan: "free" }
-      : input.creditBurn ? await getCredits(user.id) : await assertCredits(user.id, CREDIT_COSTS.generate)
+      : await getCredits(user.id)
     const activePro = hasActivePro(profile)
-    if (!activePro && profile.credits < CREDIT_COSTS.generate && !input.creditBurn) throw new Error(`You need ${CREDIT_COSTS.generate} credits for this action`)
-    await enforceRateLimit(`generate:${user.id}`, activePro ? 60 : 10)
+    const [solanaTester, evmTester] = user.isDemo ? [null, null] : await Promise.all([
+      input.chain === "solana" ? getSolanaTesterEntitlement(user.id) : null,
+      input.chain === "evm" ? getEvmTesterEntitlement(user.id) : null,
+    ])
+    const testerAccessMode = solanaTester?.eligible ? "solana-tester" : evmTester?.eligible ? "evm-tester" : null
+    const unlimitedGeneration = activePro || Boolean(testerAccessMode)
+    if (!unlimitedGeneration && profile.credits < CREDIT_COSTS.generate && !input.creditBurn) throw new Error(`You need ${CREDIT_COSTS.generate} credits for this action`)
+    await enforceRateLimit(`generate:${user.id}`, unlimitedGeneration ? 60 : 10)
 
     const evmChain = input.chain === "evm" ? getSupportedEvmChain(input.evmChainId || 8453) : undefined
     if (input.chain === "evm" && !evmChain) throw new Error("Unsupported EVM deployment network")
@@ -71,7 +79,7 @@ export async function POST(request: Request) {
       if (job.credits_charged) {
         creditsRemaining = job.credits_remaining ?? profile.credits
       } else {
-        creditsRemaining = activePro
+        creditsRemaining = unlimitedGeneration
           ? profile.credits
           : await verifyAndSpendCreditBurn(user.id, CREDIT_COSTS.generate, `${input.chain.toUpperCase()} dApp generation`, input.creditBurn)
         await markGenerationJobCharged(job.id, workerToken, creditsRemaining)

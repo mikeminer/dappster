@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server"
 import { revalidateTag } from "next/cache"
 import { z } from "zod"
-import { CREDIT_COSTS, assertCredits, hasActivePro } from "@/lib/credits"
-import { creditBurnProofSchema, verifyAndSpendCreditBurn } from "@/lib/credit-burn"
+import { CREDIT_COSTS, getCredits, hasActivePro } from "@/lib/credits"
+import { optionalCreditBurnProofSchema, verifyAndSpendCreditBurn } from "@/lib/credit-burn"
 import { deployFrontendToIPFS } from "@/lib/pinata"
 import { getRequestUser } from "@/lib/runtime"
 import { localCredits, localGetDapp, localSpend, localUpdateDapp } from "@/lib/local-store"
@@ -13,6 +13,8 @@ import { compileSolidity } from "@/lib/solidity"
 import { injectCompiledAbiIntoFrontend } from "@/lib/frontend-abi"
 import type { Abi } from "viem"
 import { hydrateDappSources } from "@/lib/source-storage"
+import { getSolanaTesterEntitlement } from "@/lib/pasta-developer-tier"
+import { getEvmTesterEntitlement } from "@/lib/pappardelle-tester-tier"
 
 const schema = z.object({
   dappId: z.string().uuid(),
@@ -22,16 +24,15 @@ const schema = z.object({
   contractTxHash: z.string().regex(/^0x[0-9a-fA-F]{64}$/).optional(),
   contractChainId: z.number().int().positive().optional(),
   solanaCluster: z.enum(["devnet", "mainnet-beta"]).optional(),
-  creditBurn: creditBurnProofSchema.optional(),
+  creditBurn: optionalCreditBurnProofSchema,
 })
 
 export async function POST(request: Request) {
   try {
     const user = await getRequestUser(request)
     const input = schema.parse(await request.json())
-    const profile = user.isDemo ? { credits: localCredits(user.id), plan: "free" } : await assertCredits(user.id, CREDIT_COSTS.deploy)
+    const profile = user.isDemo ? { credits: localCredits(user.id), plan: "free" } : await getCredits(user.id)
     const activePro = hasActivePro(profile)
-    if (!activePro && profile.credits < CREDIT_COSTS.deploy) throw new Error(`You need ${CREDIT_COSTS.deploy} credits for this action`)
     const localDapp = user.isDemo ? localGetDapp(input.dappId) : undefined
     const rows = user.isDemo ? [] : await supabaseRequest<{ name: string; frontend_code: string | null; contract_code: string | null; source_bundle_path: string | null; source_bundle_hash: string | null; chain: string; contract_address: string | null; contract_chain_id: number | null }[]>({ path: "dapps", query: { id: `eq.${input.dappId}`, owner_id: `eq.${user.id}`, select: "name,frontend_code,contract_code,source_bundle_path,source_bundle_hash,chain,contract_address,contract_chain_id", limit: "1" } })
     if (!user.isDemo && !rows[0]) throw new Error("dApp not found")
@@ -39,6 +40,13 @@ export async function POST(request: Request) {
     let frontendCode = user.isDemo ? localDapp?.frontend_code || input.frontendCode : storedDapp?.frontend_code
     const chain = user.isDemo ? localDapp?.chain || input.chain : storedDapp?.chain
     let contractAddress = user.isDemo ? localDapp?.contract_address || input.contractAddress : storedDapp?.contract_address
+    const [solanaTester, evmTester] = user.isDemo ? [null, null] : await Promise.all([
+      chain === "solana" ? getSolanaTesterEntitlement(user.id) : null,
+      chain === "evm" ? getEvmTesterEntitlement(user.id) : null,
+    ])
+    const testerAccessMode = solanaTester?.eligible ? "solana-tester" : evmTester?.eligible ? "evm-tester" : null
+    const freeDeployment = activePro || Boolean(testerAccessMode)
+    if (!freeDeployment && profile.credits < CREDIT_COSTS.deploy && !input.creditBurn) throw new Error(`You need ${CREDIT_COSTS.deploy} credits for this action`)
     const evmChainId = chain === "evm"
       ? input.contractChainId || localDapp?.contract_chain_id || storedDapp?.contract_chain_id || undefined
       : undefined
@@ -86,7 +94,7 @@ export async function POST(request: Request) {
       if (!input.solanaCluster) throw new Error("Seleziona il cluster Solana usato per il deploy")
       await verifySolanaProgramDeployment({ programId: contractAddress, cluster: input.solanaCluster })
     }
-    const creditsRemaining = activePro ? profile.credits
+    const creditsRemaining = freeDeployment ? profile.credits
       : user.isDemo ? localSpend(user.id, CREDIT_COSTS.deploy)
         : await verifyAndSpendCreditBurn(user.id, CREDIT_COSTS.deploy, "IPFS deployment", input.creditBurn)
     if (user.isDemo && localDapp) localUpdateDapp(input.dappId, { deploy_status: "deploying", frontend_code: frontendCode })
