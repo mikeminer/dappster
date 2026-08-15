@@ -202,7 +202,7 @@ export function buildSolanaRuntimeCompatibilityScript(solanaIdl?: SolanaIdl) {
           throw new Error("The self-hosted Solana runtime did not load");
         }
         window.Buffer = modules.Buffer;
-        Object.assign(window, modules.web3, modules.anchor, modules.splToken);
+        Object.assign(window, modules.web3, modules.anchor, modules.splToken, modules.phantomWalletAdapter || {});
         window.anchor = modules.anchor;
         window.web3 = modules.web3;
         if (runtime.solanaIdl) window.idl = runtime.solanaIdl;
