@@ -1,8 +1,12 @@
 {
   "name": "dappster",
   "version": "0.1.0",
+  "license": "BUSL-1.1",
   "private": true,
   "scripts": {
+    "solana:runtime": "node scripts/build-solana-browser-runtime.mjs",
+    "predev": "pnpm solana:runtime",
+    "prebuild": "pnpm solana:runtime",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
@@ -12,7 +16,8 @@
     "qa:solidity-targets": "node --no-warnings --experimental-strip-types scripts/qa-solidity-targets.mts",
     "qa:evm-wallets": "node scripts/qa-evm-wallet-requests.mjs",
     "qa:evm-factory": "node scripts/verify-deployment-factory.mjs",
-    "qa:solana-frontend": "node --no-warnings --experimental-strip-types scripts/qa-solana-frontend-runtime.mts"
+    "qa:solana-frontend": "node --no-warnings --experimental-strip-types scripts/qa-solana-frontend-runtime.mts",
+    "qa:preview-runtime": "node scripts/qa-preview-runtime.mjs"
   },
   "dependencies": {
     "@aptos-labs/ts-sdk": "^5.2.1",

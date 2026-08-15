@@ -4,15 +4,16 @@ import { buildSolanaImportAliases, buildSolanaRuntimeCompatibilityScript } from 
 const runtime = buildSolanaRuntimeCompatibilityScript()
 
 assert.doesNotThrow(() => new Function(runtime))
-assert.match(runtime, /@solana\/wallet-adapter-phantom@0\.9\.28/)
-assert.match(runtime, /Object\.assign\(window, modules\[0\], modules\[1\], modules\[2\]\)/)
+assert.match(runtime, /window\.__DAPPSTER_SOLANA_RUNTIME__/)
+assert.match(runtime, /modules\.phantomWalletAdapter \|\| \{\}/)
+assert.match(runtime, /Object\.assign\(window, modules\.web3, modules\.anchor, modules\.splToken/)
 assert.match(runtime, /runtime\.preview && window\.PublicKey/)
 assert.match(runtime, /Replaced an invalid Solana public key/)
 assert.match(runtime, /11111111111111111111111111111111/)
-assert.match(runtime, /window\.SolanaWeb3 = window\.solanaWeb3/)
-assert.match(runtime, /window\.anchorWeb3 = window\.web3/)
+assert.match(runtime, /window\.SolanaWeb3 = modules\.web3/)
+assert.match(runtime, /window\.anchorWeb3 = modules\.web3/)
 assert.ok(
-  runtime.indexOf("window.Buffer = bufferModule.Buffer") < runtime.indexOf("wallet-adapter-phantom"),
+  runtime.indexOf("window.Buffer = modules.Buffer") < runtime.indexOf("Object.assign(window, modules.web3"),
   "Buffer must be available before the Phantom adapter module loads",
 )
 
