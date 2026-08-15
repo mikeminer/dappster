@@ -27,6 +27,7 @@ const CARGO_BIN = "/vercel/sandbox/.cargo/bin"
 const IDL_BUILDER_ROOT = "/vercel/sandbox/.cache/dappster-anchor-idl-builder-v0.31.1"
 const IDL_BUILDER_MANIFEST = `${IDL_BUILDER_ROOT}/Cargo.toml`
 const SANDBOX_JOBS_ROOT = "/vercel/sandbox/jobs"
+const SOLANA_BUILD_CACHE_ROOT = "/vercel/sandbox/.cache/dappster-solana-builds-v1"
 export const SOLANA_DEPLOY_MEMO_PROGRAM = new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr")
 const LAMPORTS_PER_SIGNATURE = 5_000
 const MIN_DEPLOY_FEE_BUFFER = 2_000_000
@@ -272,6 +273,12 @@ async function compileSolanaProgramInSandbox(source: string, programId: string) 
   } catch (error) {
     throw sandboxApiError(error)
   }
+  const cached = await readCachedSolanaBuild(sandbox, jobId, programId)
+  if (cached) {
+    console.info("[solana-build-cache] hit", { jobId, byteLength: cached.byteLength })
+    return cached
+  }
+
   // Keep setup outside onCreate so a partially-created persistent sandbox can
   // repair itself on the next request instead of being permanently unusable.
   await ensureSolanaToolchain(sandbox)
@@ -371,6 +378,8 @@ async function compileSolanaProgramInSandbox(source: string, programId: string) 
   const artifact = await sandbox.readFileToBuffer({ path: `${workspace}/target/deploy/${PROGRAM_CRATE_NAME}.so` })
   if (!artifact?.length) throw new Error("La compilazione non ha prodotto un programma .so")
   if (artifact.length > MAX_PROGRAM_BYTES) throw new Error("Il programma compilato supera il limite di 2 MB")
+  await writeCachedSolanaBuild(sandbox, jobId, artifact, idl)
+  console.info("[solana-build-cache] stored", { jobId, byteLength: artifact.length })
   await removeSandboxWorkspace(sandbox, workspace)
   return { artifact: new Uint8Array(artifact), byteLength: artifact.length, idl }
 }
@@ -602,6 +611,69 @@ async function removeSandboxWorkspace(sandbox: Sandbox, workspace: string) {
   }
 }
 
+async function readCachedSolanaBuild(sandbox: Sandbox, cacheKey: string, programId: string) {
+  const cacheDirectory = `${SOLANA_BUILD_CACHE_ROOT}/${cacheKey}`
+  const cacheHit = await runSandboxCommand(sandbox, {
+    cmd: "test",
+    args: [
+      "-f", `${cacheDirectory}/program.so`,
+      "-a", "-f", `${cacheDirectory}/idl.json`,
+      "-a", "-f", `${cacheDirectory}/metadata.json`,
+    ],
+  })
+  if (cacheHit.exitCode !== 0) return null
+
+  try {
+    const [artifact, idlBuffer, metadataBuffer] = await Promise.all([
+      sandbox.readFileToBuffer({ path: `${cacheDirectory}/program.so` }),
+      sandbox.readFileToBuffer({ path: `${cacheDirectory}/idl.json` }),
+      sandbox.readFileToBuffer({ path: `${cacheDirectory}/metadata.json` }),
+    ])
+    if (!artifact?.length || artifact.length > MAX_PROGRAM_BYTES || !idlBuffer?.length || !metadataBuffer?.length) return null
+    const idl = JSON.parse(idlBuffer.toString("utf8")) as Record<string, unknown>
+    const metadata = JSON.parse(metadataBuffer.toString("utf8")) as {
+      programId?: unknown
+      byteLength?: unknown
+      artifactHash?: unknown
+    }
+    const artifactHash = createHash("sha256").update(artifact).digest("hex")
+    if (
+      idl.address !== programId
+      || metadata.programId !== programId
+      || metadata.byteLength !== artifact.length
+      || metadata.artifactHash !== artifactHash
+    ) return null
+    return { artifact: new Uint8Array(artifact), byteLength: artifact.length, idl }
+  } catch {
+    return null
+  }
+}
+
+async function writeCachedSolanaBuild(
+  sandbox: Sandbox,
+  cacheKey: string,
+  artifact: Buffer,
+  idl: Record<string, unknown>,
+) {
+  const cacheDirectory = `${SOLANA_BUILD_CACHE_ROOT}/${cacheKey}`
+  const prepare = await runSandboxCommand(sandbox, { cmd: "mkdir", args: ["-p", cacheDirectory] })
+  if (prepare.exitCode !== 0) {
+    throw commandError("Preparazione cache build Solana", await prepare.stdout(), await prepare.stderr())
+  }
+  await sandbox.writeFiles([
+    { path: `${cacheDirectory}/program.so`, content: artifact },
+    { path: `${cacheDirectory}/idl.json`, content: JSON.stringify(idl) },
+    {
+      path: `${cacheDirectory}/metadata.json`,
+      content: JSON.stringify({
+        programId: idl.address,
+        byteLength: artifact.length,
+        artifactHash: createHash("sha256").update(artifact).digest("hex"),
+      }),
+    },
+  ])
+}
+
 async function pruneExpiredSandboxWorkspaces(sandbox: Sandbox) {
   const prepareRoot = await runSandboxCommand(sandbox, { cmd: "mkdir", args: ["-p", SANDBOX_JOBS_ROOT] })
   if (prepareRoot.exitCode !== 0) {
@@ -620,6 +692,24 @@ async function pruneExpiredSandboxWorkspaces(sandbox: Sandbox) {
   })
   if (cleanup.exitCode !== 0) {
     throw commandError("Pulizia job Solana scaduti", await cleanup.stdout(), await cleanup.stderr())
+  }
+  const prepareCache = await runSandboxCommand(sandbox, { cmd: "mkdir", args: ["-p", SOLANA_BUILD_CACHE_ROOT] })
+  if (prepareCache.exitCode !== 0) {
+    throw commandError("Preparazione cache Solana", await prepareCache.stdout(), await prepareCache.stderr())
+  }
+  const pruneCache = await runSandboxCommand(sandbox, {
+    cmd: "find",
+    args: [
+      SOLANA_BUILD_CACHE_ROOT,
+      "-mindepth", "1",
+      "-maxdepth", "1",
+      "-type", "d",
+      "-mmin", "+360",
+      "-exec", "rm", "-rf", "--", "{}", "+",
+    ],
+  })
+  if (pruneCache.exitCode !== 0) {
+    throw commandError("Pulizia cache build Solana", await pruneCache.stdout(), await pruneCache.stderr())
   }
 }
 
