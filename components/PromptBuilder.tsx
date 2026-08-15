@@ -868,7 +868,20 @@ export function PromptBuilder() {
       if (args.length !== compiled.constructorInputs.length) throw new Error(`Expected ${compiled.constructorInputs.length} constructor values, received ${args.length}`)
 
       setDeployStage("wallet")
-      const connectedWallet = await getConnectedEvmWallet(selectedChain)
+      const workspace = await apiFetch<{ wallets?: Array<{ chain?: string; wallet_address?: string }> }>("/api/me")
+      const linkedEvmAddresses = (workspace.wallets || [])
+        .filter(wallet => wallet.chain === "evm" && typeof wallet.wallet_address === "string")
+        .map(wallet => wallet.wallet_address!.replace(/^web3:ethereum:/i, ""))
+      let connectedWallet: Awaited<ReturnType<typeof getConnectedEvmWallet>>
+      try {
+        connectedWallet = await getConnectedEvmWallet(selectedChain, linkedEvmAddresses)
+      } catch (walletError) {
+        if (linkedEvmAddresses.length) {
+          const linked = linkedEvmAddresses.map(address => `${address.slice(0, 6)}…${address.slice(-4)}`).join(", ")
+          throw new Error(`Select your linked EVM account ${linked} in your wallet, then try again. Dappster will not deploy from an unlinked account.`)
+        }
+        throw walletError
+      }
       const provider = connectedWallet.connector.id === "injected"
         ? selectDeploymentProvider(connectedWallet.provider, selectedChain.id)
         : connectedWallet.provider
