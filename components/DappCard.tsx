@@ -10,7 +10,7 @@ export function DappCard({ dapp }: { dapp: Dapp }) {
       <Link href={`/dapp/${dapp.id}`} className="dapp-card-link">
         <div className="dapp-top">
           <div className={`dapp-icon accent-${dapp.accent}`}>{dapp.icon}</div>
-          <ChainNetworkBadge chain={dapp.chain} chainId={dapp.chainId} />
+          <ChainNetworkBadge chain={dapp.chain} chainId={dapp.chainId} network={dapp.network} />
         </div>
         <h3>{dapp.name}</h3>
         <p>{dapp.description}</p>

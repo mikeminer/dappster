@@ -11,6 +11,7 @@ export function toDappCard(dapp: PublicDapp): Dapp {
     description: dapp.description || "An onchain application built with Dappster.",
     chain: dapp.chain,
     chainId: dapp.contract_chain_id,
+    network: dapp.contract_network || (dapp.chain === "solana" ? "devnet" : null),
     tags: dapp.tags || [],
     owner: dapp.publisher_name || (ownerId ? `${ownerId.slice(0, 5)}…${ownerId.slice(-4)}` : "Dappster"),
     icon: dapp.name.slice(0, 1).toUpperCase(),

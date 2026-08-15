@@ -24,6 +24,8 @@ export function setLocalWalletSession(session: LocalWalletSession) {
 export function clearLocalWalletSession() {
   localStorage.removeItem(WALLET_SESSION_KEY)
   localStorage.removeItem(DEMO_USER_KEY)
+  localStorage.removeItem("dappster-projects")
+  localStorage.removeItem("dappster-pending-generation")
   window.dispatchEvent(new Event("dappster-auth-change"))
 }
 
@@ -44,7 +46,19 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
       ...init.headers,
     },
   })
-  const payload = await response.json() as T & { error?: string }
+  const responseText = await response.text()
+  let payload: T & { error?: string }
+  try {
+    payload = (responseText ? JSON.parse(responseText) : {}) as T & { error?: string }
+  } catch {
+    if (response.ok) throw new Error("Dappster returned an invalid server response. Please try again.")
+    const timedOut = response.status === 504 || /(?:timed? out|an error occurred)/i.test(responseText)
+    payload = {
+      error: timedOut
+        ? "The deployment worker timed out. Your recorded payment is safe; retry without sending SOL again."
+        : responseText.trim().slice(0, 500) || `Request failed (${response.status})`,
+    } as T & { error?: string }
+  }
   if (!response.ok) {
     const message = payload.error || `Request failed (${response.status})`
     if (typeof window !== "undefined" && /(?:insufficient|not enough) credits|you need \d+ credits?|crediti insufficienti/i.test(message)) {

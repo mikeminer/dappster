@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Loader2, Search } from "lucide-react"
 import type { Dapp } from "@/types"
 import { toDappCard } from "@/lib/dapp-card-data"
@@ -8,18 +8,23 @@ import type { PublicDapp } from "@/lib/public-dapps"
 import { DappCard } from "./DappCard"
 import { CHAIN_ADAPTERS, CHAIN_IDS } from "@/lib/chain-adapters"
 
-export function ExploreGrid() {
+export function ExploreGrid({ initialDapps, initialHasMore, initialMode }: {
+  initialDapps: PublicDapp[]
+  initialHasMore: boolean
+  initialMode?: string
+}) {
   const pageSize = 12
   const [chain, setChain] = useState("all")
   const [query, setQuery] = useState("")
   const [debouncedQuery, setDebouncedQuery] = useState("")
-  const [dapps, setDapps] = useState<Dapp[]>([])
-  const [loading, setLoading] = useState(true)
+  const [dapps, setDapps] = useState<Dapp[]>(() => initialDapps.map(toDappCard))
+  const [loading, setLoading] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
-  const [hasMore, setHasMore] = useState(false)
+  const [hasMore, setHasMore] = useState(initialHasMore)
   const [page, setPage] = useState(1)
   const [error, setError] = useState("")
-  const [demoMode, setDemoMode] = useState(false)
+  const [demoMode, setDemoMode] = useState(initialMode === "local")
+  const skipInitialRequest = useRef(true)
 
   useEffect(() => {
     const timeout = window.setTimeout(() => setDebouncedQuery(query.trim()), 300)
@@ -27,6 +32,11 @@ export function ExploreGrid() {
   }, [query])
 
   useEffect(() => {
+    if (skipInitialRequest.current && chain === "all" && !debouncedQuery) {
+      skipInitialRequest.current = false
+      return
+    }
+    skipInitialRequest.current = false
     const controller = new AbortController()
     const params = new URLSearchParams({ page: "1", limit: String(pageSize) })
     if (chain !== "all") params.set("chain", chain)

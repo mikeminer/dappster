@@ -1,18 +1,20 @@
 import type { Abi } from "viem"
 import { getSupportedEvmChain } from "@/lib/evm-chains"
+import { buildSolanaImportAliases, buildSolanaRuntimeCompatibilityScript, inferLegacySolanaIdl, replaceSolanaProgramId, wrapSolanaBabelSource } from "@/lib/solana-frontend"
 
 function browserReadySource(frontendCode: string) {
   const defaultFunction = frontendCode.match(/export\s+default\s+function\s+([A-Za-z_$][\w$]*)/)
   const defaultIdentifier = frontendCode.match(/export\s+default\s+([A-Za-z_$][\w$]*)\s*;?/)
   const componentName = defaultFunction?.[1] || defaultIdentifier?.[1] || "App"
+  const solanaImportAliases = buildSolanaImportAliases(frontendCode)
   return {
     componentName,
-    source: frontendCode
+    source: `${solanaImportAliases}\n${frontendCode
       .replace(/^\s*import[\s\S]*?from\s+["'][^"']+["'];?\s*$/gm, "")
       .replace(/^\s*import\s+["'][^"']+["'];?\s*$/gm, "")
       .replace(/export\s+default\s+function\s+/, "function ")
       .replace(/^\s*export\s+default\s+[A-Za-z_$][\w$]*\s*;?\s*$/gm, "")
-      .replace(/<\/script/gi, "<\\/script"),
+      .replace(/<\/script/gi, "<\\/script")}`,
   }
 }
 
@@ -213,8 +215,11 @@ export function buildEvmRuntimeCompatibilityScript(contractAbi?: Abi, chainId?: 
 
 export function buildHTMLShell(frontendCode: string, contractAddress: string, chain: string, preview = false, contractAbi?: Abi, evmChainId?: number) {
   const prepared = browserReadySource(frontendCode)
+  const solanaIdl = chain === "solana" ? inferLegacySolanaIdl(prepared.source, contractAddress) : undefined
+  const preparedSource = chain === "solana" ? replaceSolanaProgramId(prepared.source, contractAddress) : prepared.source
   const runtime = JSON.stringify({ contractAddress, chain, preview, abi: contractAbi || null, evmChain: chain === "evm" ? evmRuntimeChain(evmChainId) : undefined }).replace(/</g, "\\u003c")
   const evmCompatibility = buildEvmRuntimeCompatibilityScript(contractAbi, chain === "evm" ? evmChainId : undefined)
+  const solanaCompatibility = buildSolanaRuntimeCompatibilityScript(solanaIdl)
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -276,13 +281,21 @@ export function buildHTMLShell(frontendCode: string, contractAddress: string, ch
   <script>window.__DAPPSTER__=${runtime};</script>
   <script>
     ${evmCompatibility}
+    ${solanaCompatibility}
     if (window.solanaWeb3) Object.assign(window, window.solanaWeb3);
   </script>
   <script type="text/babel" data-presets="env,react,typescript" data-filename="App.tsx">
+    ${chain === "solana" ? wrapSolanaBabelSource(`
     const { useCallback, useEffect, useMemo, useRef, useState } = React;
-    ${prepared.source}
+    ${preparedSource}
     const root = ReactDOM.createRoot(document.getElementById("root"));
     root.render(React.createElement(${prepared.componentName}));
+    `) : `
+    const { useCallback, useEffect, useMemo, useRef, useState } = React;
+    ${preparedSource}
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(React.createElement(${prepared.componentName}));
+    `}
   </script>
 </body>
 </html>`

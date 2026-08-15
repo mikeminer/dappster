@@ -4,7 +4,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { LayoutDashboard } from "lucide-react"
 import { Logo } from "./Logo"
-import { ConnectButtonNoSSR } from "./ConnectButtonNoSSR"
+import { ConnectWalletIsland } from "./ConnectWalletIsland"
 
 const links = [
   ["/build", "Build"],
@@ -25,7 +25,7 @@ export function Header() {
           </nav>
           <div className="nav-actions">
             <Link href="/dashboard" className="btn btn-ghost dashboard-link" aria-label="Open dashboard"><LayoutDashboard size={16} aria-hidden="true" /><span>Dashboard</span></Link>
-            <ConnectButtonNoSSR />
+            <ConnectWalletIsland />
           </div>
         </div>
       </header>

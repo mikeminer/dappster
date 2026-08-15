@@ -142,20 +142,6 @@ type ContractDeployment = EvmContractDeployment | SolanaProgramDeployment | SuiP
 
 type Deployment = { cid: string; url: string; creditsRemaining: number; status: "live" }
 type DeployStage = "quoting" | "funding" | "queued" | "compiling" | "wallet" | "confirming" | "recording" | "burning" | "pinning" | null
-type RememberedProject = {
-  id: string
-  name: string
-  description?: string
-  chain: Chain
-  contract_code?: string
-  frontend_code?: string
-  contract_address?: string
-  contract_tx_hash?: `0x${string}`
-  contract_chain_id?: number
-  contract_network?: string
-  ipfs_hash?: string
-  ipfs_url?: string
-}
 
 type PreparedGeneration = {
   dappId: string
@@ -185,6 +171,10 @@ type SavedGenerationProject = {
 const PENDING_GENERATION_KEY = "dappster-pending-generation"
 
 function rememberProject(generation: Generation, prompt: string, chain: Chain, contract?: ContractDeployment, deployment?: Deployment, targetChainId?: number, targetSolanaCluster?: "devnet" | "mainnet-beta") {
+  if (generation.mode !== "local") {
+    localStorage.removeItem("dappster-projects")
+    return
+  }
   const current = JSON.parse(localStorage.getItem("dappster-projects") || "[]") as Record<string, unknown>[]
   const project = {
     id: generation.dappId,
@@ -268,19 +258,39 @@ function transactionMatchesFunding(transaction: ParsedTransactionWithMeta | null
 
 async function recoverConfirmedSolanaFunding(connection: Connection, quote: SolanaDeploymentQuote, wallet: PublicKey) {
   const payer = new PublicKey(quote.payer)
-  const recent = await connection.getSignaturesForAddress(payer, { limit: 25 }, "confirmed")
+  const retryRead = async <T,>(operation: () => Promise<T>) => {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await operation()
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        if (!/(?:\b429\b|too many requests|rate[ -]?limit)/i.test(message) || attempt >= 6) throw error
+        const delayMs = Math.min(10_000, 750 * (2 ** attempt)) + Math.floor(Math.random() * 250)
+        await new Promise(resolve => setTimeout(resolve, delayMs))
+      }
+    }
+  }
+  const recent = await retryRead(() => connection.getSignaturesForAddress(payer, { limit: 25 }, "confirmed"))
   if (!recent.length) return null
-  const transactions = await connection.getParsedTransactions(recent.map(item => item.signature), {
-    commitment: "confirmed",
-    maxSupportedTransactionVersion: 0,
-  })
-  const index = transactions.findIndex(transaction => transactionMatchesFunding(transaction, {
-    wallet,
-    payer,
-    lamports: quote.requiredLamports,
-    memo: quote.memo,
-  }))
-  return index >= 0 ? recent[index].signature : null
+  // Public Solana RPCs frequently reject a 25-item getTransactions batch.
+  // Read small groups with exponential backoff and stop as soon as the
+  // unique funding memo is found, avoiding both duplicate transfers and 429s.
+  for (let offset = 0; offset < recent.length; offset += 5) {
+    const signatures = recent.slice(offset, offset + 5)
+    const transactions = await retryRead(() => connection.getParsedTransactions(signatures.map(item => item.signature), {
+      commitment: "confirmed",
+      maxSupportedTransactionVersion: 0,
+    }))
+    const index = transactions.findIndex(transaction => transactionMatchesFunding(transaction, {
+      wallet,
+      payer,
+      lamports: quote.requiredLamports,
+      memo: quote.memo,
+    }))
+    if (index >= 0) return signatures[index].signature
+    if (offset + 5 < recent.length) await new Promise(resolve => setTimeout(resolve, 250))
+  }
+  return null
 }
 
 export function PromptBuilder() {
@@ -338,6 +348,11 @@ export function PromptBuilder() {
       try {
         const pending = JSON.parse(localStorage.getItem(PENDING_GENERATION_KEY) || "null") as PreparedGeneration | null
         if (!pending?.dappId) return
+        const workspace = await apiFetch<{ dapps?: Array<{ id: string }> }>("/api/me")
+        if (!workspace.dapps?.some(project => project.id === pending.dappId)) {
+          localStorage.removeItem(PENDING_GENERATION_KEY)
+          return
+        }
         setPrompt(pending.prompt)
         setChain(pending.chain)
         if (pending.evmChainId && getSupportedEvmChain(pending.evmChainId)) setEvmChainId(pending.evmChainId)
@@ -345,7 +360,7 @@ export function PromptBuilder() {
         runId = ++generationRunRef.current
         setLoading(true)
         setError("")
-        const recovered = await recoverPreparedGeneration(pending, 12, runId)
+        const recovered = await recoverPreparedGeneration(pending, 132, runId)
         if (active && generationRunRef.current === runId && !recovered) setError("Generation is still processing. Dappster will recover it when it is ready; you can safely keep this page open or return later.")
       } catch {
         if (active) localStorage.removeItem(PENDING_GENERATION_KEY)
@@ -421,37 +436,7 @@ export function PromptBuilder() {
       }).catch(cause => setError(cause instanceof Error ? cause.message : "Saved project could not be loaded"))
       return
     }
-    try {
-      const remembered = JSON.parse(localStorage.getItem("dappster-projects") || "[]") as RememberedProject[]
-      const pending = remembered.find(project => project.frontend_code && !project.ipfs_url)
-      if (!pending) return
-      setChain(pending.chain)
-      if (pending.contract_chain_id && getSupportedEvmChain(pending.contract_chain_id)) setEvmChainId(pending.contract_chain_id)
-      setPrompt(pending.description || "Recovered deployment")
-      setGeneration({
-        dappId: pending.id,
-        name: pending.name,
-        contract: pending.contract_code || "",
-        frontend: pending.frontend_code!,
-        deployInstructions: "Recovered from this browser after the contract was confirmed on-chain.",
-        warnings: [],
-        creditsRemaining: null,
-        mode: "local",
-      })
-      if (pending.chain === "evm" && pending.contract_address && pending.contract_tx_hash && pending.contract_chain_id) {
-        setContractDeployment({ kind: "evm", address: pending.contract_address as `0x${string}`, txHash: pending.contract_tx_hash, chainId: pending.contract_chain_id, status: "confirmed" })
-      } else if (pending.chain === "solana") {
-        const cluster: SolanaDeploymentCluster = pending.contract_network === "mainnet-beta" ? "mainnet-beta" : "devnet"
-        setSolanaCluster(cluster)
-        if (pending.contract_address) setContractDeployment({ kind: "solana", address: pending.contract_address, cluster, status: "confirmed" })
-      } else if (pending.chain === "sui" && pending.contract_address && pending.contract_tx_hash) {
-        setContractDeployment({ kind: "sui", address: pending.contract_address, txHash: pending.contract_tx_hash, network: "testnet", status: "confirmed" })
-      } else if (pending.chain === "aptos" && pending.contract_address && /^0x[0-9a-fA-F]{64}$/.test(pending.contract_tx_hash || "")) {
-        setContractDeployment({ kind: "aptos", address: pending.contract_address, txHash: pending.contract_tx_hash as `0x${string}`, network: "devnet", status: "confirmed" })
-      }
-    } catch {
-      localStorage.removeItem("dappster-projects")
-    }
+    localStorage.removeItem("dappster-projects")
   }, [setSolanaCluster])
 
   function applyRecoveredGeneration(project: SavedGenerationProject, pending: PreparedGeneration) {
@@ -486,6 +471,35 @@ export function PromptBuilder() {
       } catch {
         // The authenticated project may still be committing after a suspended request.
       }
+      // Retry the durable job once near the beginning (for a fast provider
+      // failure) and once after the five-minute worker lease can expire. Avoid
+      // repeated POSTs so recovery cannot consume the generation rate limit.
+      if (attempt === 4 || attempt === 124) {
+        try {
+          const output = await apiFetch<Generation>("/api/generate", {
+            method: "POST",
+            body: JSON.stringify({
+              prompt: pending.prompt,
+              chain: pending.chain,
+              evmChainId: pending.evmChainId,
+              includeAudit: false,
+              creditBurn: pending.creditBurn,
+              dappId: pending.dappId,
+            }),
+          })
+          if (generationRunRef.current !== runId) return false
+          setGeneration(output)
+          setCreditBalance(output.creditsRemaining)
+          setTab("contract")
+          setError("")
+          clearPendingCreditBurn(pending.creditBurn)
+          localStorage.removeItem(PENDING_GENERATION_KEY)
+          rememberProject(output, pending.prompt, pending.chain, undefined, undefined, pending.evmChainId, pending.solanaCluster)
+          return true
+        } catch {
+          // A live worker still owns the lease or the retry delay has not elapsed.
+        }
+      }
       if (attempt + 1 < attempts) await new Promise(resolve => window.setTimeout(resolve, 2500))
     }
     return false
@@ -510,7 +524,14 @@ export function PromptBuilder() {
     try {
       const creditBurn = await burnCreditsFromUserWallet(5, `${requestedChain} dApp generation`)
       if (controller.signal.aborted) throw new DOMException("Generation canceled", "AbortError")
-      const savedPending = JSON.parse(localStorage.getItem(PENDING_GENERATION_KEY) || "null") as PreparedGeneration | null
+      let savedPending = JSON.parse(localStorage.getItem(PENDING_GENERATION_KEY) || "null") as PreparedGeneration | null
+      if (savedPending?.dappId) {
+        const workspace = await apiFetch<{ dapps?: Array<{ id: string }> }>("/api/me")
+        if (!workspace.dapps?.some(project => project.id === savedPending?.dappId)) {
+          localStorage.removeItem(PENDING_GENERATION_KEY)
+          savedPending = null
+        }
+      }
       if (savedPending?.dappId) {
         if (savedPending.prompt !== requestedPrompt || savedPending.chain !== requestedChain || savedPending.evmChainId !== requestedEvmChainId) {
           throw new Error("Another generation is still pending. Wait for Dappster to recover it before starting a different project.")
@@ -547,7 +568,7 @@ export function PromptBuilder() {
       if (generationRunRef.current !== runId) return
       const message = cause instanceof Error ? cause.message : "Generation failed"
       const interrupted = /load failed|failed to fetch|network request failed|networkerror/i.test(message)
-      if (prepared && interrupted && await recoverPreparedGeneration(prepared, 12, runId)) return
+      if (prepared && interrupted && await recoverPreparedGeneration(prepared, 132, runId)) return
       setError(interrupted && prepared
         ? "The mobile browser paused the connection. Generation is still recoverable and Dappster will resume it when the saved result is ready."
         : message)

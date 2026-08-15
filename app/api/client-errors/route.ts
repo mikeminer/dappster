@@ -11,7 +11,7 @@ export async function POST(request: NextRequest) {
     || request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
     || "unknown"
   try {
-    enforceRateLimit(`client-error:${clientAddress}`, 20, 60_000)
+    await enforceRateLimit(`client-error:${clientAddress}`, 20, 60_000)
   } catch {
     return NextResponse.json({ error: "Rate limit reached" }, { status: 429 })
   }

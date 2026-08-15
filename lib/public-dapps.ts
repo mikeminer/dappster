@@ -1,3 +1,4 @@
+import { unstable_cache } from "next/cache"
 import { formatPublisher } from "@/lib/publisher"
 import { localListDapps } from "@/lib/local-store"
 import { listPublicDappListings } from "@/lib/pinata-listings"
@@ -13,6 +14,7 @@ export type PublicDapp = Record<string, unknown> & {
   description?: string
   chain: Chain
   contract_chain_id?: number | null
+  contract_network?: string | null
   tags?: string[]
   is_featured?: boolean
   publisher_name?: string
@@ -20,14 +22,16 @@ export type PublicDapp = Record<string, unknown> & {
   ipfs_url?: string
 }
 
-export async function getPublicDapps({ page = 1, limit = 12, chain, featured, tags, search }: {
+export type PublicDappQuery = {
   page?: number
   limit?: number
   chain?: string | null
   featured?: boolean
   tags?: string | null
   search?: string | null
-} = {}) {
+}
+
+export async function getPublicDapps({ page = 1, limit = 12, chain, featured, tags, search }: PublicDappQuery = {}) {
   const safePage = Math.max(1, page)
   const safeLimit = Math.min(50, Math.max(1, limit))
   const safeSearch = search?.trim().replace(/[,.*%(){}\[\]"'\\]/g, " ").replace(/\s+/g, " ").slice(0, 80) || ""
@@ -63,7 +67,7 @@ export async function getPublicDapps({ page = 1, limit = 12, chain, featured, ta
   }
 
   const query: Record<string, string> = {
-    select: "id,owner_id,name,description,chain,contract_address,contract_chain_id,ipfs_hash,ipfs_url,app_visibility,frontend_visibility,is_featured,tags,screenshot_url,created_at",
+    select: "id,owner_id,name,description,chain,contract_address,contract_chain_id,contract_network,ipfs_hash,ipfs_url,app_visibility,frontend_visibility,is_featured,tags,screenshot_url,created_at",
     is_listed: "eq.true",
     order: "is_featured.desc,created_at.desc",
     offset: String((safePage - 1) * safeLimit),
@@ -91,4 +95,14 @@ export async function getPublicDapps({ page = 1, limit = 12, chain, featured, ta
     return { ...visible, publisher_name }
   })
   return { dapps: dapps as PublicDapp[], page: safePage, limit: safeLimit, hasMore }
+}
+
+const getCachedPublicDappsInternal = unstable_cache(
+  async (query: PublicDappQuery) => getPublicDapps(query),
+  ["public-dapps-v2"],
+  { revalidate: 3600, tags: ["public-dapps"] },
+)
+
+export function getCachedPublicDapps(query: PublicDappQuery = {}) {
+  return getCachedPublicDappsInternal(query)
 }

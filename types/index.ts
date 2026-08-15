@@ -6,6 +6,7 @@ export interface Dapp {
   description: string
   chain: Chain
   chainId?: number | null
+  network?: string | null
   tags: string[]
   owner: string
   icon: string

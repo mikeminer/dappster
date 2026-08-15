@@ -32,11 +32,12 @@ export async function burnCreditsFromUserWallet(amount: number, action: string):
   if (!intent.usageId) throw new Error("Dappster could not create a credit burn authorization")
   if (!BASE_MEMBERSHIP_CONTRACT) throw new Error("The Base membership contract is not configured")
 
-  const { address: payer, wallet } = await getConnectedEvmWallet(base)
   const workspace = await apiFetch<Workspace>("/api/me")
-  if (!workspace.wallets?.some(linked => linked.chain === "evm" && linked.wallet_address.toLowerCase() === payer.toLowerCase())) {
-    throw new Error("Use the EVM wallet linked to this Dappster account to burn credits")
-  }
+  const linkedEvmAddresses = (workspace.wallets || [])
+    .filter(linked => linked.chain === "evm")
+    .map(linked => linked.wallet_address)
+  if (!linkedEvmAddresses.length) throw new Error("Link an EVM wallet to your Dappster account before burning credits")
+  const { address: payer, wallet } = await getConnectedEvmWallet(base, linkedEvmAddresses)
 
   const publicClient = createPublicClient({ chain: base, transport: http() })
   const balance = await publicClient.readContract({

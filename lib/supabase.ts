@@ -8,6 +8,12 @@ function env() {
   return { url, publishable, secret }
 }
 
+export function getSupabaseAdminConfig() {
+  const { url, secret } = env()
+  if (!secret) throw new Error("Supabase service role is not configured")
+  return { url, secret }
+}
+
 export async function supabaseRequest<T>({ path, method = "GET", token, body, query }: SupabaseRequest): Promise<T> {
   const { url, publishable, secret } = env()
   const endpoint = new URL(`${url}/rest/v1/${path}`)

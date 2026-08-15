@@ -4,7 +4,7 @@ import { CHAIN_IDS } from "@/lib/chain-adapters"
 import { getRequestUser } from "@/lib/runtime"
 import { localCreateDapp } from "@/lib/local-store"
 import { supabaseRequest } from "@/lib/supabase"
-import { getPublicDapps } from "@/lib/public-dapps"
+import { getCachedPublicDapps } from "@/lib/public-dapps"
 
 export async function GET(request: Request) {
   try {
@@ -12,7 +12,7 @@ export async function GET(request: Request) {
     const page = Math.max(1, Number(url.searchParams.get("page")) || 1)
     const limit = Math.min(50, Math.max(1, Number(url.searchParams.get("limit")) || 12))
     const chain = url.searchParams.get("chain")
-    const payload = await getPublicDapps({
+    const payload = await getCachedPublicDapps({
       page,
       limit,
       chain,

@@ -4,11 +4,12 @@ import { z } from "zod"
 import { getRequestUser } from "@/lib/runtime"
 import { localGetDapp } from "@/lib/local-store"
 import { supabaseRequest } from "@/lib/supabase"
+import { hydrateDappSources } from "@/lib/source-storage"
 import {
   verifySolanaDeployFunding,
   verifySolanaDeployAuthorization,
 } from "@/lib/solana-program-deploy"
-import { claimNextSolanaDeployJob, fundAndClaimSolanaDeployJob, getSolanaDeployJob } from "@/lib/solana-deploy-jobs"
+import { claimNextSolanaDeployJob, fundAndClaimSolanaDeployJob, getSolanaDeployJob, releaseSolanaDeployJob } from "@/lib/solana-deploy-jobs"
 import { processClaimedSolanaDeployJob } from "@/lib/solana-deploy-worker"
 import { accountHasWallet } from "@/lib/accounts"
 
@@ -30,11 +31,11 @@ export async function POST(request: Request) {
     const input = schema.parse(await request.json())
     const authorizedWallet = verifySolanaDeployAuthorization(input)
     const localDapp = user.isDemo ? localGetDapp(input.dappId) : undefined
-    const rows = user.isDemo ? [] : await supabaseRequest<{ name: string; chain: string; contract_code: string; contract_address: string | null }[]>({
+    const rows = user.isDemo ? [] : await supabaseRequest<{ name: string; chain: string; contract_code: string | null; contract_address: string | null; source_bundle_path: string | null; source_bundle_hash: string | null }[]>({
       path: "dapps",
-      query: { id: `eq.${input.dappId}`, owner_id: `eq.${user.id}`, select: "name,chain,contract_code,contract_address", limit: "1" },
+      query: { id: `eq.${input.dappId}`, owner_id: `eq.${user.id}`, select: "name,chain,contract_code,contract_address,source_bundle_path,source_bundle_hash", limit: "1" },
     })
-    const dapp = localDapp || rows[0]
+    const dapp = localDapp || (rows[0] ? await hydrateDappSources(rows[0]) : undefined)
     if (!dapp || (localDapp && localDapp.owner_id !== user.id)) throw new Error("dApp non trovata")
     if (dapp.chain !== "solana") throw new Error("Questa dApp non contiene un programma Solana")
     if (!dapp.contract_code) throw new Error("Codice del programma Solana non trovato")
@@ -46,9 +47,21 @@ export async function POST(request: Request) {
     }
 
     const sourceHash = createHash("sha256").update(dapp.contract_code).digest("hex")
-    const job = await getSolanaDeployJob(input.jobId, user.id, user.isDemo)
+    let job = await getSolanaDeployJob(input.jobId, user.id, user.isDemo)
     if (!job || job.dapp_id !== input.dappId || job.cluster !== input.cluster || job.wallet_address !== input.wallet || job.source_hash !== sourceHash) {
       throw new Error("Il preventivo non corrisponde a questo deploy Solana")
+    }
+    const staleRequestMs = (maxDuration + 15) * 1_000
+    const jobUpdatedAt = Date.parse(job.updated_at)
+    if (job.status === "deploying" && job.worker_token && Number.isFinite(jobUpdatedAt) && Date.now() - jobUpdatedAt > staleRequestMs) {
+      await releaseSolanaDeployJob(
+        job.id,
+        job.worker_token,
+        "Previous deployment request exceeded the Vercel execution limit; funding remains recorded",
+        user.isDemo,
+      )
+      job = await getSolanaDeployJob(input.jobId, user.id, user.isDemo)
+      if (!job) throw new Error("Job di deploy Solana non trovato dopo il recupero")
     }
     if (dapp.contract_address) {
       if (dapp.contract_address !== job.program_id) throw new Error("Il programma Solana è già stato distribuito con un altro Program ID")
@@ -71,14 +84,14 @@ export async function POST(request: Request) {
       fundingSignature: input.fundingSignature,
       fundedLamports: funding.transferredLamports,
       workerToken,
-      leaseSeconds: 50 * 60,
+      leaseSeconds: maxDuration + 60,
     }, user.isDemo)
     if (claim.job.status === "confirmed") {
       return NextResponse.json({ kind: "solana", address: claim.job.program_id, cluster: claim.job.cluster, status: "confirmed", jobId: claim.job.id })
     }
     if (!claim.acquired) {
       const recoveryToken = randomUUID()
-      const next = await claimNextSolanaDeployJob(input.cluster, recoveryToken, user.isDemo)
+      const next = await claimNextSolanaDeployJob(input.cluster, recoveryToken, user.isDemo, maxDuration + 60)
       if (next.acquired && next.job) await processClaimedSolanaDeployJob(next.job, recoveryToken, user.isDemo).catch(() => undefined)
       return NextResponse.json({ kind: "solana-job", jobId: job.id, programId: job.program_id, cluster: job.cluster, status: "queued" }, { status: 202 })
     }

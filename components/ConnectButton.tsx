@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { type ReactNode, useEffect, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import { useConnect, useDisconnect } from "wagmi"
 import { useWallet } from "@solana/wallet-adapter-react"
 import { useAppKit, useAppKitAccount, useAppKitProvider } from "@reown/appkit/react"
@@ -22,7 +23,7 @@ type EvmLoginProvider = {
 
 type ReownAccountState = { isConnected: boolean; address?: string }
 type ReownConnectionState = {
-  open(options: { view: "ConnectingWalletConnectBasic"; namespace: "eip155" | "solana" }): Promise<unknown>
+  open(options: { view: "Connect"; namespace: "eip155" | "solana" }): Promise<unknown>
   evmAccount: ReownAccountState
   evmProvider?: EvmLoginProvider
   solanaAccount: ReownAccountState
@@ -32,6 +33,12 @@ type ReownConnectionState = {
 const disconnectedReownAccount: ReownAccountState = { isConnected: false }
 
 const EVM_QR_LOGIN_PENDING_KEY = "dappster:evm-qr-login-pending"
+const SOLANA_QR_LOGIN_PENDING_KEY = "dappster:solana-qr-login-pending"
+
+function ModalPortal({ children }: { children: ReactNode }) {
+  if (typeof document === "undefined") return null
+  return createPortal(children, document.body)
+}
 
 function reportWalletLoginError(flow: string, error: unknown) {
   const message = error instanceof Error ? error.message : String(error)
@@ -62,7 +69,14 @@ async function waitForSolanaAdapter(adapter: { connected: boolean; publicKey: { 
   }
 }
 
-function ReownConnectButton(props: { mode?: "button" | "panel"; redirectTo?: string }) {
+type ConnectButtonProps = {
+  mode?: "button" | "panel"
+  redirectTo?: string
+  controlledOpen?: boolean
+  onOpenChange?: (open: boolean) => void
+}
+
+function ReownConnectButton(props: ConnectButtonProps) {
   const { open } = useAppKit()
   const evmAccount = useAppKitAccount({ namespace: "eip155" })
   const { walletProvider: evmProvider } = useAppKitProvider<EvmLoginProvider>("eip155")
@@ -71,12 +85,17 @@ function ReownConnectButton(props: { mode?: "button" | "panel"; redirectTo?: str
   return <ConnectButtonCore {...props} reown={{ open, evmAccount, evmProvider, solanaAccount, solanaProvider }} />
 }
 
-export function ConnectButton(props: { mode?: "button" | "panel"; redirectTo?: string }) {
+export function ConnectButton(props: ConnectButtonProps) {
   return reownEnabled ? <ReownConnectButton {...props} /> : <ConnectButtonCore {...props} reown={null} />
 }
 
-function ConnectButtonCore({ mode = "button", redirectTo, reown }: { mode?: "button" | "panel"; redirectTo?: string; reown: ReownConnectionState | null }) {
-  const [open, setOpen] = useState(false)
+function ConnectButtonCore({ mode = "button", redirectTo, controlledOpen, onOpenChange, reown }: ConnectButtonProps & { reown: ReownConnectionState | null }) {
+  const [internalOpen, setInternalOpen] = useState(false)
+  const open = controlledOpen ?? internalOpen
+  const setOpen = (nextOpen: boolean) => {
+    if (onOpenChange) onOpenChange(nextOpen)
+    else setInternalOpen(nextOpen)
+  }
   const [message, setMessage] = useState("")
   const [loading, setLoading] = useState<"evm" | "solana" | null>(null)
   const [localSession, setLocalSessionState] = useState<LocalWalletSession | null>(null)
@@ -231,8 +250,10 @@ function ConnectButtonCore({ mode = "button", redirectTo, reown }: { mode?: "but
   }, [reownEvmAccount.address, reownEvmAccount.isConnected, reownEvmProvider])
 
   useEffect(() => {
-    if (!solanaQrLoginPending.current || !reownSolanaAccount.isConnected || !reownSolanaAccount.address || !reownSolanaProvider) return
+    const pending = solanaQrLoginPending.current || window.sessionStorage.getItem(SOLANA_QR_LOGIN_PENDING_KEY) === "1"
+    if (!pending || !reownSolanaAccount.isConnected || !reownSolanaAccount.address || !reownSolanaProvider) return
     solanaQrLoginPending.current = false
+    window.sessionStorage.removeItem(SOLANA_QR_LOGIN_PENDING_KEY)
     loginAttempt.current = true
     setLoading("solana")
     void authenticateSolanaWallet(reownSolanaProvider, reownSolanaAccount.address)
@@ -254,6 +275,11 @@ function ConnectButtonCore({ mode = "button", redirectTo, reown }: { mode?: "but
       setMessage("")
       if (connectionType === "walletConnect") {
         if (!reownEnabled) throw new Error("QR login is not configured yet")
+        // Hand off between modal systems instead of stacking the AppKit sheet on
+        // top of Dappster's backdrop. Stacked fixed dialogs can trap or obscure
+        // the wallet chooser in mobile browsers even when their z-index differs.
+        setOpen(false)
+        await new Promise<void>(resolve => window.requestAnimationFrame(() => resolve()))
         // This button explicitly starts a new WalletConnect flow. Do not reuse an
         // injected or restored AppKit provider here: doing so skips the modal and
         // immediately asks the wallet to sign, which looks like a broken button.
@@ -263,7 +289,7 @@ function ConnectButtonCore({ mode = "button", redirectTo, reown }: { mode?: "but
         evmQrLoginPending.current = true
         window.sessionStorage.setItem(EVM_QR_LOGIN_PENDING_KEY, "1")
         if (!openAppKit) throw new Error("QR login is not configured yet")
-        await openAppKit({ view: "ConnectingWalletConnectBasic", namespace: "eip155" })
+        await openAppKit({ view: "Connect", namespace: "eip155" })
         return
       }
       const connector = connectors.find(item => item.id === connectionType)
@@ -330,11 +356,15 @@ function ConnectButtonCore({ mode = "button", redirectTo, reown }: { mode?: "but
     if (loginAttempt.current) return
     setMessage("")
     solanaQrLoginPending.current = true
+    window.sessionStorage.setItem(SOLANA_QR_LOGIN_PENDING_KEY, "1")
     try {
       if (!openAppKit) throw new Error("QR login is not configured yet")
-      await openAppKit({ view: "ConnectingWalletConnectBasic", namespace: "solana" })
+      setOpen(false)
+      await new Promise<void>(resolve => window.requestAnimationFrame(() => resolve()))
+      await openAppKit({ view: "Connect", namespace: "solana" })
     } catch (error) {
       solanaQrLoginPending.current = false
+      window.sessionStorage.removeItem(SOLANA_QR_LOGIN_PENDING_KEY)
       setMessage(error instanceof Error ? error.message : "Could not open Solana QR login")
     }
   }
@@ -352,10 +382,55 @@ function ConnectButtonCore({ mode = "button", redirectTo, reown }: { mode?: "but
   }
 
   const connected = Boolean(authenticatedWallet || localSession)
-  if (connected) return <div className={mode === "panel" ? "form-stack" : undefined}><button className="btn btn-outline" onClick={() => { setMessage(""); setOpen(true) }}><span className="status-dot" /> {connectedLabel}</button>{mode === "panel" && <button className="btn btn-primary btn-block" onClick={() => router.push(redirectTo || "/dashboard")}>Continue to dashboard</button>}{open && <div className="modal-backdrop" onMouseDown={() => setOpen(false)}><div className="modal" onMouseDown={event => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Dappster account"><div className="panel-head"><div><div className="panel-title">Your Dappster account</div><div style={{color:"#737b85",fontSize:12,marginTop:5}}>Linked wallets share credits, projects and subscriptions.</div></div><button className="btn btn-ghost" onClick={() => setOpen(false)}>×</button></div><div className="panel-body form-stack"><button className="btn btn-primary btn-block" onClick={() => { setOpen(false); router.push("/dashboard") }}>Open dashboard</button><div className="form-stack">{linkedWallets.map(wallet => <div className="deploy-result" key={`${wallet.chain}:${wallet.wallet_address}`}><div><span className="chain-badge">{wallet.chain === "evm" ? "EVM" : "Solana"}</span><div className="mono" style={{marginTop:7,fontSize:11}}>{wallet.wallet_address}</div></div><span className="status"><span className="status-dot" /> Linked</span></div>)}</div>{reownEnabled && linkedWallets.some(wallet => wallet.chain === "evm") && <button className="wallet-option" disabled={Boolean(loading)} onClick={() => connectEvm("walletConnect")}><span className="wallet-logo">{loading === "evm" ? <Loader2 className="animate-spin" size={17} /> : <img src="/chain-logos/ethereum.svg" alt="Ethereum" width={21} height={21} />}</span><span><strong>WalletConnect Ethereum</strong><small style={{display:"block",color:"#707883",marginTop:4}}>Reconnect the same EVM address with Zerion or another compatible wallet</small></span></button>}{!linkedWallets.some(wallet => wallet.chain === "evm") && <button className="wallet-option" disabled={Boolean(loading)} onClick={() => connectEvm()}><span className="wallet-logo">{loading === "evm" ? <Loader2 className="animate-spin" size={17} /> : <img src="/chain-logos/ethereum.svg" alt="Ethereum" width={21} height={21} />}</span><span><strong>Link EVM wallet</strong><small style={{display:"block",color:"#707883",marginTop:4}}>Share this account on Base and other EVM chains</small></span></button>}{!linkedWallets.some(wallet => wallet.chain === "solana") && <button className="wallet-option" disabled={Boolean(loading)} onClick={() => connectSolana()}><span className="wallet-logo">{loading === "solana" ? <Loader2 className="animate-spin" size={17} /> : <img src="/chain-logos/solana.svg" alt="Solana" width={21} height={21} />}</span><span><strong>Link Solana wallet</strong><small style={{display:"block",color:"#707883",marginTop:4}}>Use the same credits with Phantom</small></span></button>}{message && <p className="error-box" style={{fontSize:11,lineHeight:1.5}}>{message}</p>}<button className="btn btn-ghost btn-block" onClick={signOut}>Sign out of Dappster</button></div></div></div>}</div>
+  if (connected) return <div className={mode === "panel" ? "form-stack" : undefined}>
+    <button className="btn btn-outline" onClick={() => { setMessage(""); setOpen(true) }}>
+      <span className="status-dot" /> {connectedLabel}
+    </button>
+    {mode === "panel" && <button className="btn btn-primary btn-block" onClick={() => router.push(redirectTo || "/dashboard")}>Continue to dashboard</button>}
+    {open && <ModalPortal>
+      <div className="modal-backdrop" onMouseDown={() => setOpen(false)}>
+        <div className="modal" onMouseDown={event => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Dappster account">
+          <div className="panel-head">
+            <div>
+              <div className="panel-title">Your Dappster account</div>
+              <div style={{color:"#737b85",fontSize:12,marginTop:5}}>Linked wallets share credits, projects and subscriptions.</div>
+            </div>
+            <button className="btn btn-ghost" onClick={() => setOpen(false)}>×</button>
+          </div>
+          <div className="panel-body form-stack">
+            <button className="btn btn-primary btn-block" onClick={() => { setOpen(false); router.push("/dashboard") }}>Open dashboard</button>
+            <div className="form-stack">{linkedWallets.map(wallet => <div className="deploy-result" key={`${wallet.chain}:${wallet.wallet_address}`}><div><span className="chain-badge">{wallet.chain === "evm" ? "EVM" : "Solana"}</span><div className="mono" style={{marginTop:7,fontSize:11}}>{wallet.wallet_address}</div></div><span className="status"><span className="status-dot" /> Linked</span></div>)}</div>
+            {reownEnabled && linkedWallets.some(wallet => wallet.chain === "evm") && <button className="wallet-option" disabled={Boolean(loading)} onClick={() => connectEvm("walletConnect")}><span className="wallet-logo">{loading === "evm" ? <Loader2 className="animate-spin" size={17} /> : <img src="/chain-logos/ethereum.svg" alt="Ethereum" width={21} height={21} />}</span><span><strong>WalletConnect Ethereum</strong><small style={{display:"block",color:"#707883",marginTop:4}}>Reconnect the same EVM address with Zerion or another compatible wallet</small></span></button>}
+            {!linkedWallets.some(wallet => wallet.chain === "evm") && <button className="wallet-option" disabled={Boolean(loading)} onClick={() => connectEvm()}><span className="wallet-logo">{loading === "evm" ? <Loader2 className="animate-spin" size={17} /> : <img src="/chain-logos/ethereum.svg" alt="Ethereum" width={21} height={21} />}</span><span><strong>Link EVM wallet</strong><small style={{display:"block",color:"#707883",marginTop:4}}>Share this account on Base and other EVM chains</small></span></button>}
+            {!linkedWallets.some(wallet => wallet.chain === "solana") && <button className="wallet-option" disabled={Boolean(loading)} onClick={() => connectSolana()}><span className="wallet-logo">{loading === "solana" ? <Loader2 className="animate-spin" size={17} /> : <img src="/chain-logos/solana.svg" alt="Solana" width={21} height={21} />}</span><span><strong>Link Solana wallet</strong><small style={{display:"block",color:"#707883",marginTop:4}}>Use the same credits with Phantom</small></span></button>}
+            {message && <p className="error-box" style={{fontSize:11,lineHeight:1.5}}>{message}</p>}
+            <button className="btn btn-ghost btn-block" onClick={signOut}>Sign out of Dappster</button>
+          </div>
+        </div>
+      </div>
+    </ModalPortal>}
+  </div>
 
   const options = <><button className="wallet-option" disabled={Boolean(loading)} onClick={() => connectEvm()}><span className="wallet-logo">{loading === "evm" ? <Loader2 className="animate-spin" size={17} /> : <img src="/chain-logos/ethereum.svg" alt="Ethereum" width={21} height={21} />}</span><span><strong>Browser Ethereum</strong><small style={{display:"block",color:"#707883",marginTop:4}}>MetaMask, Rabby, Zerion and compatible extensions</small></span></button><button className="wallet-option" disabled={Boolean(loading)} onClick={() => connectSolana()}><span className="wallet-logo">{loading === "solana" ? <Loader2 className="animate-spin" size={17} /> : <img src="/chain-logos/solana.svg" alt="Solana" width={21} height={21} />}</span><span><strong>Phantom / Solana</strong><small style={{display:"block",color:"#707883",marginTop:4}}>Connect and sign a gasless message</small></span></button>{reownEnabled && <><div className="wallet-divider"><span>or connect with WalletConnect</span></div><div className="qr-login-grid"><button className="btn btn-outline" disabled={Boolean(loading)} onClick={() => connectEvm("walletConnect")}><img src="/chain-logos/ethereum.svg" alt="" width={16} height={16} /> WalletConnect Ethereum</button><button className="btn btn-outline" disabled={Boolean(loading)} onClick={connectSolanaQr}><img src="/chain-logos/solana.svg" alt="" width={16} height={16} /> WalletConnect Solana</button></div></>}{message && <p className="error-box" style={{fontSize:11,lineHeight:1.5,marginTop:12}}>{message}</p>}<p style={{color:"#5f6670",fontSize:11,lineHeight:1.5,margin:"18px 0 0"}}>Connection uses a secure, gasless authentication message. Dappster never takes custody of your assets.</p></>
 
   if (mode === "panel") return <div>{options}</div>
-  return <><button className="btn btn-outline" onClick={() => { setMessage(""); setOpen(true) }}><span aria-hidden="true">◇</span> Connect wallet</button>{open && <div className="modal-backdrop" onMouseDown={() => setOpen(false)}><div className="modal" onMouseDown={event => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Connect wallet"><div className="panel-head"><div><div className="panel-title">Connect your wallet</div><div style={{color:"#737b85",fontSize:12,marginTop:5}}>Choose a network to sign in to Dappster.</div></div><button className="btn btn-ghost" onClick={() => setOpen(false)}>×</button></div><div className="panel-body">{options}</div></div></div>}</>
+  return <>
+    <button className="btn btn-outline" onClick={() => { setMessage(""); setOpen(true) }}>
+      <span aria-hidden="true">◇</span> Connect wallet
+    </button>
+    {open && <ModalPortal>
+      <div className="modal-backdrop" onMouseDown={() => setOpen(false)}>
+        <div className="modal" onMouseDown={event => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Connect wallet">
+          <div className="panel-head">
+            <div>
+              <div className="panel-title">Connect your wallet</div>
+              <div style={{color:"#737b85",fontSize:12,marginTop:5}}>Choose a network to sign in to Dappster.</div>
+            </div>
+            <button className="btn btn-ghost" onClick={() => setOpen(false)}>×</button>
+          </div>
+          <div className="panel-body">{options}</div>
+        </div>
+      </div>
+    </ModalPortal>}
+  </>
 }
