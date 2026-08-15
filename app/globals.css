@@ -320,30 +320,63 @@ button { color: inherit; }
 .wallet-connect-native-backdrop { display: none; }
 .wallet-connect-native-toggle:checked ~ .wallet-connect-native-backdrop { display: grid; }
 .launcher-intro-backdrop { z-index: 140; background: radial-gradient(circle at 50% 25%, rgba(199,255,50,.1), transparent 38%), rgba(0,0,0,.82); }
-.launcher-intro-modal { position: relative; width: min(500px, 100%); padding: 34px; overflow: hidden; border-color: rgba(199,255,50,.3); background: linear-gradient(145deg, rgba(199,255,50,.055), transparent 38%), #0d0f12; text-align: center; }
+.launcher-intro-modal { position: relative; width: min(760px, 100%); max-height: calc(100dvh - 32px); padding: 30px; overflow-x: hidden; overflow-y: auto; border-color: rgba(199,255,50,.3); background: radial-gradient(circle at 12% 0, rgba(199,255,50,.08), transparent 33%), #0d0f12; text-align: left; }
 .launcher-intro-modal::before { content: ""; position: absolute; inset: 0 0 auto; height: 2px; background: linear-gradient(90deg, transparent, var(--acid), transparent); }
-.launcher-intro-mark { width: 62px; height: 62px; margin: 0 auto 16px; display: grid; place-items: center; border: 1px solid rgba(199,255,50,.38); border-radius: 15px; color: #050700; background: var(--acid); box-shadow: 0 0 34px rgba(199,255,50,.16); transform: rotate(-4deg); }
+.launcher-intro-header { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 20px; padding-right: 30px; }
+.launcher-intro-heading { min-width: 0; }
+.launcher-intro-mark { width: 62px; height: 62px; display: grid; place-items: center; border: 1px solid rgba(199,255,50,.38); border-radius: 15px; color: #050700; background: var(--acid); box-shadow: 0 0 34px rgba(199,255,50,.16); transform: rotate(-4deg); }
 .launcher-intro-mark span { font-size: 38px; font-weight: 950; letter-spacing: -.08em; transform: rotate(4deg); }
 .launcher-intro-kicker { margin: 0 0 9px; color: var(--acid); font: 700 10px/1.2 "SFMono-Regular", Consolas, monospace; letter-spacing: .16em; }
-.launcher-intro-modal h2 { margin: 0; font-size: clamp(29px, 6vw, 43px); line-height: 1.02; letter-spacing: -.055em; }
-.launcher-intro-copy { max-width: 390px; margin: 15px auto 18px; color: #8d96a1; font-size: 13px; line-height: 1.65; }
+.launcher-intro-modal h2 { margin: 0; font-size: clamp(29px, 5vw, 42px); line-height: 1.02; letter-spacing: -.055em; }
+.launcher-intro-copy { max-width: 570px; margin: 10px 0 0; color: #8d96a1; font-size: 13px; line-height: 1.55; }
+.launcher-intro-creator-row { margin-top: 20px; padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid #252a31; border-radius: 10px; background: rgba(0,0,0,.18); }
 .launcher-intro-creator { display: inline-flex; align-items: center; gap: 5px; color: #aeb6c0; font-size: 12px; text-decoration: none; }
 .launcher-intro-creator strong { color: white; }
 .launcher-intro-creator:hover strong { color: var(--acid); }
-.launcher-intro-token { margin-top: 12px; padding: 10px 12px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid rgba(184,255,31,.3); border-radius: 8px; color: var(--acid); background: rgba(184,255,31,.05); font-size: 11px; font-weight: 750; text-decoration: none; transition: border-color .16s ease, background .16s ease; }
+.launcher-intro-token { padding: 7px 9px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid rgba(184,255,31,.3); border-radius: 7px; color: var(--acid); background: rgba(184,255,31,.05); font-size: 10px; font-weight: 750; text-decoration: none; white-space: nowrap; transition: border-color .16s ease, background .16s ease; }
 .launcher-intro-token:hover { border-color: var(--acid); background: rgba(184,255,31,.1); }
+.launcher-intro-benefits { margin-top: 18px; }
+.launcher-intro-section-heading { display: flex; align-items: center; gap: 10px; }
+.launcher-intro-section-heading > span:last-child, .launcher-intro-section-heading small, .launcher-intro-section-heading strong { display: block; }
+.launcher-intro-section-heading small { margin-bottom: 3px; color: #7f8893; font: 700 8px/1.2 "SFMono-Regular", Consolas, monospace; letter-spacing: .11em; }
+.launcher-intro-section-heading strong { color: #f3f5f7; font-size: 15px; }
+.launcher-intro-section-icon { width: 34px; height: 34px; display: grid; flex: 0 0 auto; place-items: center; border: 1px solid rgba(199,255,50,.25); border-radius: 9px; color: var(--acid); background: rgba(199,255,50,.06); }
+.launcher-intro-benefits-title { margin: 9px 0 12px 44px; color: #7e8792; font-size: 11px; line-height: 1.45; }
+.launcher-intro-benefits-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.launcher-intro-benefit { min-width: 0; padding: 15px; display: flex; flex-direction: column; gap: 12px; border: 1px solid #292f36; border-radius: 11px; color: inherit; background: linear-gradient(145deg, rgba(199,255,50,.04), transparent 45%), #101318; text-decoration: none; transition: transform .16s ease, border-color .16s ease, background .16s ease; }
+.launcher-intro-benefit:hover { border-color: rgba(199,255,50,.55); background-color: #12171a; transform: translateY(-2px); }
+.launcher-intro-benefit-topline { display: flex; align-items: center; gap: 8px; color: white; font-size: 12px; font-weight: 800; }
+.launcher-intro-benefit-topline small { margin-left: auto; color: var(--acid); font: 700 7px/1.2 "SFMono-Regular", Consolas, monospace; letter-spacing: .08em; }
+.launcher-intro-benefit-logo { width: 31px; height: 31px; display: grid; place-items: center; border: 1px solid #303741; border-radius: 50%; background: #090b0e; }
+.launcher-intro-benefit-logo img { display: block; }
+.launcher-intro-benefit-copy, .launcher-intro-benefit-copy > * { display: block; }
+.launcher-intro-benefit-copy > small { margin-bottom: 4px; color: #737d88; font: 700 7px/1.2 "SFMono-Regular", Consolas, monospace; letter-spacing: .09em; }
+.launcher-intro-benefit-copy > strong { color: #f7f8f9; font-size: 17px; letter-spacing: -.025em; }
+.launcher-intro-benefit-copy > span { min-height: 48px; margin-top: 8px; color: #929ba6; font-size: 10px; line-height: 1.55; }
+.launcher-intro-benefit-copy > em { margin-top: 10px; padding-top: 9px; border-top: 1px solid #252b31; color: #68717c; font-size: 9px; font-style: normal; line-height: 1.45; }
+.launcher-intro-benefit-action { margin-top: auto; display: flex; align-items: center; justify-content: space-between; color: var(--acid); font-size: 10px; font-weight: 800; }
 .launcher-intro-contract { margin: 14px 0; padding: 15px; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 13px; border: 1px solid #2d343c; border-radius: 10px; color: inherit; background: rgba(0,0,0,.22); text-align: left; text-decoration: none; transition: border-color .16s ease, background .16s ease; }
 .launcher-intro-contract:hover { border-color: #4d6fff; background: rgba(45,84,255,.06); }
 .launcher-intro-base-logo { width: 46px; height: 46px; display: grid; place-items: center; border-radius: 50%; background: white; }
 .launcher-intro-base-logo img { display: block; }
 .launcher-intro-contract small, .launcher-intro-contract strong, .launcher-intro-contract code { display: block; }
-.launcher-intro-contract small { margin-bottom: 5px; color: #707986; font: 700 8px/1.2 "SFMono-Regular", Consolas, monospace; letter-spacing: .09em; }
+.launcher-intro-contract small { margin-bottom: 5px; display: flex; align-items: center; gap: 5px; color: #707986; font: 700 8px/1.2 "SFMono-Regular", Consolas, monospace; letter-spacing: .09em; }
 .launcher-intro-contract strong { color: #f1f3f5; font-size: 13px; }
 .launcher-intro-contract code { margin-top: 5px; color: #78818c; font-size: 9px; }
 .launcher-intro-contract > svg { color: #68717d; }
 .launcher-intro-enter { min-height: 47px; }
 @media (max-width: 520px) {
-  .launcher-intro-modal { padding: 29px 20px 22px; }
+  .launcher-intro-modal { padding: 24px 16px 18px; }
+  .launcher-intro-header { grid-template-columns: 46px 1fr; gap: 13px; padding-right: 22px; }
+  .launcher-intro-mark { width: 46px; height: 46px; border-radius: 12px; }
+  .launcher-intro-mark span { font-size: 29px; }
+  .launcher-intro-modal h2 { font-size: 27px; }
+  .launcher-intro-copy { font-size: 11px; }
+  .launcher-intro-creator-row { align-items: stretch; flex-direction: column; }
+  .launcher-intro-token { width: 100%; }
+  .launcher-intro-benefits-title { margin-left: 0; }
+  .launcher-intro-benefits-grid { grid-template-columns: 1fr; }
+  .launcher-intro-benefit-copy > span { min-height: 0; }
   .launcher-intro-contract { grid-template-columns: auto 1fr; }
   .launcher-intro-contract > svg { display: none; }
 }
