@@ -26,6 +26,7 @@ const TOOLCHAIN_BIN = "/vercel/sandbox/.local/share/solana/install/active_releas
 const CARGO_BIN = "/vercel/sandbox/.cargo/bin"
 const IDL_BUILDER_ROOT = "/vercel/sandbox/.cache/dappster-anchor-idl-builder-v0.31.1"
 const IDL_BUILDER_MANIFEST = `${IDL_BUILDER_ROOT}/Cargo.toml`
+const SANDBOX_JOBS_ROOT = "/vercel/sandbox/jobs"
 export const SOLANA_DEPLOY_MEMO_PROGRAM = new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr")
 const LAMPORTS_PER_SIGNATURE = 5_000
 const MIN_DEPLOY_FEE_BUFFER = 2_000_000
@@ -276,9 +277,12 @@ async function compileSolanaProgramInSandbox(source: string, programId: string) 
   await ensureSolanaToolchain(sandbox)
   await ensureAnchorIdlBuilder(sandbox)
 
+  await pruneExpiredSandboxWorkspaces(sandbox)
+  await removeSandboxWorkspace(sandbox, workspace)
+
   const prepareWorkspace = await runSandboxCommand(sandbox, {
     cmd: "mkdir",
-    args: ["-p", `${workspace}/src`, `${workspace}/target/deploy`],
+    args: ["-p", `${workspace}/src`],
   })
   if (prepareWorkspace.exitCode !== 0) {
     throw commandError("Preparazione workspace Solana", await prepareWorkspace.stdout(), await prepareWorkspace.stderr())
@@ -309,25 +313,9 @@ async function compileSolanaProgramInSandbox(source: string, programId: string) 
     throw commandError("Risoluzione dipendenze Solana", await lock.stdout(), await lock.stderr())
   }
 
-  const build = await runSandboxCommand(sandbox, {
-    cmd: `${TOOLCHAIN_BIN}/cargo-build-sbf`,
-    args: ["--manifest-path", `${workspace}/Cargo.toml`, "--sbf-out-dir", `${workspace}/target/deploy`, "--", "--locked"],
-    cwd: workspace,
-    env: {
-      HOME: "/vercel/sandbox",
-      PATH: `${TOOLCHAIN_BIN}:${CARGO_BIN}:/usr/local/bin:/usr/bin:/bin`,
-      CARGO_TERM_COLOR: "never",
-      CARGO_HTTP_CAINFO: "/etc/pki/tls/certs/ca-bundle.crt",
-      SSL_CERT_FILE: "/etc/pki/tls/certs/ca-bundle.crt",
-    },
-  })
-  const stdout = await build.stdout()
-  const stderr = await build.stderr()
-  if (build.exitCode !== 0) throw commandError("Compilazione del programma Solana", stdout, stderr)
-
-  const artifact = await sandbox.readFileToBuffer({ path: `${workspace}/target/deploy/${PROGRAM_CRATE_NAME}.so` })
-  if (!artifact?.length) throw new Error("La compilazione non ha prodotto un programma .so")
-  if (artifact.length > MAX_PROGRAM_BYTES) throw new Error("Il programma compilato supera il limite di 2 MB")
+  // Anchor compiles the program again with `idl-build`. Generate the IDL first,
+  // then remove its debug output before starting SBF compilation so both full
+  // dependency graphs never occupy persistent Sandbox storage together.
   const idlBuild = await runSandboxCommand(sandbox, {
     cmd: `${CARGO_BIN}/cargo`,
     args: ["run", "--quiet", "--release", "--manifest-path", IDL_BUILDER_MANIFEST, "--", workspace],
@@ -336,6 +324,9 @@ async function compileSolanaProgramInSandbox(source: string, programId: string) 
       HOME: "/vercel/sandbox",
       PATH: `${CARGO_BIN}:${TOOLCHAIN_BIN}:/usr/local/bin:/usr/bin:/bin`,
       CARGO_TERM_COLOR: "never",
+      CARGO_INCREMENTAL: "0",
+      CARGO_PROFILE_DEV_DEBUG: "0",
+      CARGO_PROFILE_DEV_INCREMENTAL: "false",
       CARGO_HTTP_CAINFO: "/etc/pki/tls/certs/ca-bundle.crt",
       SSL_CERT_FILE: "/etc/pki/tls/certs/ca-bundle.crt",
     },
@@ -350,6 +341,37 @@ async function compileSolanaProgramInSandbox(source: string, programId: string) 
     throw new Error("Anchor non ha prodotto un IDL JSON valido")
   }
   idl.address = programId
+
+  const resetTarget = await runSandboxCommand(sandbox, { cmd: "rm", args: ["-rf", "--", `${workspace}/target`] })
+  if (resetTarget.exitCode !== 0) {
+    throw commandError("Pulizia artefatti IDL Anchor", await resetTarget.stdout(), await resetTarget.stderr())
+  }
+  const prepareDeploy = await runSandboxCommand(sandbox, { cmd: "mkdir", args: ["-p", `${workspace}/target/deploy`] })
+  if (prepareDeploy.exitCode !== 0) {
+    throw commandError("Preparazione artefatto Solana", await prepareDeploy.stdout(), await prepareDeploy.stderr())
+  }
+
+  const build = await runSandboxCommand(sandbox, {
+    cmd: `${TOOLCHAIN_BIN}/cargo-build-sbf`,
+    args: ["--manifest-path", `${workspace}/Cargo.toml`, "--sbf-out-dir", `${workspace}/target/deploy`, "--", "--locked"],
+    cwd: workspace,
+    env: {
+      HOME: "/vercel/sandbox",
+      PATH: `${TOOLCHAIN_BIN}:${CARGO_BIN}:/usr/local/bin:/usr/bin:/bin`,
+      CARGO_TERM_COLOR: "never",
+      CARGO_INCREMENTAL: "0",
+      CARGO_HTTP_CAINFO: "/etc/pki/tls/certs/ca-bundle.crt",
+      SSL_CERT_FILE: "/etc/pki/tls/certs/ca-bundle.crt",
+    },
+  })
+  const stdout = await build.stdout()
+  const stderr = await build.stderr()
+  if (build.exitCode !== 0) throw commandError("Compilazione del programma Solana", stdout, stderr)
+
+  const artifact = await sandbox.readFileToBuffer({ path: `${workspace}/target/deploy/${PROGRAM_CRATE_NAME}.so` })
+  if (!artifact?.length) throw new Error("La compilazione non ha prodotto un programma .so")
+  if (artifact.length > MAX_PROGRAM_BYTES) throw new Error("Il programma compilato supera il limite di 2 MB")
+  await removeSandboxWorkspace(sandbox, workspace)
   return { artifact: new Uint8Array(artifact), byteLength: artifact.length, idl }
 }
 
@@ -569,6 +591,35 @@ async function sendLoaderTransaction(
       }
       throw new Error(`${label} failed: ${message}${logs?.length ? `\n${logs.join("\n")}` : ""}`)
     }
+  }
+}
+
+async function removeSandboxWorkspace(sandbox: Sandbox, workspace: string) {
+  if (!workspace.startsWith(`${SANDBOX_JOBS_ROOT}/`)) throw new Error("Invalid Solana build workspace")
+  const cleanup = await runSandboxCommand(sandbox, { cmd: "rm", args: ["-rf", "--", workspace] })
+  if (cleanup.exitCode !== 0) {
+    throw commandError("Pulizia workspace Solana", await cleanup.stdout(), await cleanup.stderr())
+  }
+}
+
+async function pruneExpiredSandboxWorkspaces(sandbox: Sandbox) {
+  const prepareRoot = await runSandboxCommand(sandbox, { cmd: "mkdir", args: ["-p", SANDBOX_JOBS_ROOT] })
+  if (prepareRoot.exitCode !== 0) {
+    throw commandError("Preparazione directory job Solana", await prepareRoot.stdout(), await prepareRoot.stderr())
+  }
+  const cleanup = await runSandboxCommand(sandbox, {
+    cmd: "find",
+    args: [
+      SANDBOX_JOBS_ROOT,
+      "-mindepth", "1",
+      "-maxdepth", "1",
+      "-type", "d",
+      "-mmin", "+60",
+      "-exec", "rm", "-rf", "--", "{}", "+",
+    ],
+  })
+  if (cleanup.exitCode !== 0) {
+    throw commandError("Pulizia job Solana scaduti", await cleanup.stdout(), await cleanup.stderr())
   }
 }
 
