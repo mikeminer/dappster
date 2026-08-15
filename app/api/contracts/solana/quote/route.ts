@@ -48,7 +48,9 @@ export async function POST(request: Request) {
       built = await compileSolanaProgram(dapp.contract_code, program.publicKey.toBase58())
     } catch (error) {
       const compilerError = error instanceof Error ? error.message : "Unknown Solana compilation error"
-      if (!compilerError.includes("Compilazione del programma Solana non riuscita")) throw error
+      const repairableSourceError = compilerError.includes("Compilazione del programma Solana non riuscita")
+        || compilerError.includes("Generazione IDL Anchor non riuscita")
+      if (!repairableSourceError) throw error
       await enforceRateLimit(`compile-repair:${user.id}:solana`, 3)
       const repairedSource = await repairGeneratedContract("solana", dapp.contract_code, compilerError)
       const repairedBuild = await compileSolanaProgram(repairedSource, program.publicKey.toBase58())
