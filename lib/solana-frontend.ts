@@ -1,9 +1,47 @@
-import { sha256 } from "@noble/hashes/sha256"
-import { utf8ToBytes } from "@noble/hashes/utils"
+import { createHash } from "crypto"
 
 export type SolanaIdl = Record<string, unknown>
 
 const SOLANA_RUNTIME_MARKER = "dappster-solana-runtime-v1"
+
+const SOLANA_BROWSER_MODULES: Record<string, string> = {
+  "@solana/web3.js": "window.solanaWeb3",
+  "@coral-xyz/anchor": "window.anchor",
+  "@solana/spl-token": "window.splToken",
+  "@solana/wallet-adapter-phantom": "window.phantomWalletAdapter",
+}
+
+export function buildSolanaImportAliases(frontendSource: string) {
+  const declarations: string[] = []
+  const declared = new Set<string>()
+  const add = (localName: string, expression: string) => {
+    if (!/^[A-Za-z_$][\w$]*$/.test(localName) || declared.has(localName)) return
+    declarations.push(`const ${localName} = ${expression};`)
+    declared.add(localName)
+  }
+  const importPattern = /^\s*import\s+([\s\S]*?)\s+from\s+["']([^"']+)["'];?\s*$/gm
+  for (const match of Array.from(frontendSource.matchAll(importPattern))) {
+    const moduleGlobal = SOLANA_BROWSER_MODULES[match[2]]
+    if (!moduleGlobal) continue
+    const clause = match[1].trim()
+    if (clause.startsWith("type ")) continue
+
+    const namespace = /\*\s+as\s+([A-Za-z_$][\w$]*)/.exec(clause)
+    if (namespace) add(namespace[1], moduleGlobal)
+
+    const named = /\{([\s\S]*?)\}/.exec(clause)
+    if (named) {
+      for (const entry of named[1].split(",")) {
+        const parsed = /^(?:type\s+)?([A-Za-z_$][\w$]*)(?:\s+as\s+([A-Za-z_$][\w$]*))?$/.exec(entry.trim())
+        if (parsed && !entry.trim().startsWith("type ")) add(parsed[2] || parsed[1], `${moduleGlobal}.${parsed[1]}`)
+      }
+    }
+
+    const defaultImport = /^([A-Za-z_$][\w$]*)\s*(?:,|$)/.exec(clause)
+    if (defaultImport) add(defaultImport[1], `(${moduleGlobal}.default || ${moduleGlobal})`)
+  }
+  return declarations.join("\n")
+}
 
 function snakeCase(value: string) {
   return value
@@ -21,7 +59,7 @@ function pascalCase(value: string) {
 }
 
 function discriminator(namespace: "global" | "account", name: string) {
-  return Array.from(sha256(utf8ToBytes(`${namespace}:${name}`)).subarray(0, 8))
+  return Array.from(createHash("sha256").update(`${namespace}:${name}`).digest().subarray(0, 8))
 }
 
 function matchingDelimiter(source: string, start: number, open: string, close: string) {
@@ -196,17 +234,41 @@ export function buildSolanaRuntimeCompatibilityScript(solanaIdl?: SolanaIdl) {
         window.__DAPPSTER_SOLANA_READY__ = Promise.resolve();
         return;
       }
-      window.__DAPPSTER_SOLANA_READY__ = Promise.resolve().then(function () {
-        const modules = window.__DAPPSTER_SOLANA_RUNTIME__;
-        if (!modules || !modules.anchor || !modules.splToken || !modules.Buffer) {
-          throw new Error("The self-hosted Solana runtime did not load");
+      window.__DAPPSTER_SOLANA_READY__ = (async function () {
+        if (!window.Buffer) {
+          const bufferModule = await import("https://esm.sh/buffer@6.0.3?bundle&target=es2020");
+          window.Buffer = bufferModule.Buffer;
         }
-        window.Buffer = modules.Buffer;
-        Object.assign(window, modules.web3, modules.anchor, modules.splToken, modules.phantomWalletAdapter || {});
-        window.anchor = modules.anchor;
-        window.web3 = modules.web3;
+        const modules = await Promise.all([
+          import("https://esm.sh/@coral-xyz/anchor@0.30.1?bundle&target=es2020"),
+          import("https://esm.sh/@solana/spl-token@0.4.15?bundle&target=es2020"),
+          import("https://esm.sh/@solana/wallet-adapter-phantom@0.9.28?bundle&target=es2020"),
+        ]);
+        Object.assign(window, modules[0], modules[1], modules[2]);
+        window.anchor = modules[0];
+        window.splToken = modules[1];
+        window.phantomWalletAdapter = modules[2];
+        window.SolanaWeb3 = window.solanaWeb3;
+        window.web3 = modules[0].web3 || window.solanaWeb3;
+        window.anchorWeb3 = window.web3;
         if (runtime.solanaIdl) window.idl = runtime.solanaIdl;
-      });
+        if (runtime.preview && window.PublicKey) {
+          const OriginalPublicKey = window.PublicKey;
+          const PreviewPublicKey = new Proxy(OriginalPublicKey, {
+            construct(target, args) {
+              try {
+                return Reflect.construct(target, args, target);
+              } catch (error) {
+                console.warn("[Dappster preview] Replaced an invalid Solana public key", args[0], error);
+                return Reflect.construct(target, ["11111111111111111111111111111111"], target);
+              }
+            },
+          });
+          window.PublicKey = PreviewPublicKey;
+          try { if (window.solanaWeb3) window.solanaWeb3.PublicKey = PreviewPublicKey; } catch {}
+          try { if (window.anchor && window.anchor.web3) window.anchor.web3.PublicKey = PreviewPublicKey; } catch {}
+        }
+      })();
     })();
   `
 }
@@ -219,12 +281,8 @@ export function wrapSolanaBabelSource(source: string) {
       ${source}
     }).catch(function (error) {
       console.error("[Dappster Solana runtime]", error);
-      if (window.__DAPPSTER_PREVIEW__?.fail) {
-        window.__DAPPSTER_PREVIEW__.fail(error);
-      } else {
-        const root = document.getElementById("root");
-        if (root) root.innerHTML = '<div class="boot" style="padding:24px;text-align:center">Unable to load the Solana runtime. Reload the dApp and try again.</div>';
-      }
+      const root = document.getElementById("root");
+      if (root) root.innerHTML = '<div class="boot" style="padding:24px;text-align:center">Unable to load the Solana runtime. Reload the dApp and try again.</div>';
     });
   `
 }

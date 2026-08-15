@@ -15,6 +15,7 @@ import { ChainNetworkBadge } from "@/components/ChainNetworkBadge"
 import type { AssetVisibility, MarketplaceAsset } from "@/lib/marketplace"
 import type { AuditReport, Chain } from "@/types"
 import { getChainAdapter } from "@/lib/chain-adapters"
+import { DappIdentityPanel, type ConfirmedRelease } from "@/components/DappIdentityPanel"
 
 type AssetAccess = { visibility: AssetVisibility; price: number; unlocked: boolean; purchased: boolean }
 type Detail = {
@@ -25,8 +26,6 @@ type Detail = {
   tags?: string[]
   owner_id?: string
   publisher_name?: string
-  publisher_username?: string | null
-  publisher_points?: number
   contract_address?: string
   contract_tx_hash?: string
   contract_chain_id?: number
@@ -45,6 +44,7 @@ type Detail = {
   solana_payout_address?: string | null
   marketplace?: Record<MarketplaceAsset, AssetAccess>
   viewer?: { isOwner: boolean; authenticated: boolean }
+  registry_release?: ConfirmedRelease | null
 }
 
 function safeFileStem(name: string) {
@@ -161,7 +161,7 @@ export function DappDetailClient({ id }: { id: string }) {
     try {
       setAuditing(true)
       setError("")
-      const creditBurn = await burnCreditsFromUserWallet(25, `${dapp.chain} premium deployed-contract audit`)
+      const creditBurn = await burnCreditsFromUserWallet(25, "premium deployed-contract audit")
       await apiFetch("/api/audit", { method: "POST", body: JSON.stringify({ dappId: dapp.id, contractCode: dapp.contract_code, chain: dapp.chain, tier: "premium", creditBurn }) })
       clearPendingCreditBurn(creditBurn)
       await load()
@@ -183,11 +183,11 @@ export function DappDetailClient({ id }: { id: string }) {
   }
 
   return <>
-    <section className="page-hero"><div className="container"><Link href="/explore" className="back-link"><ArrowLeft size={14} /> Back to Marketplace</Link><div className="detail-title"><div className="dapp-icon accent-blue">{dapp.name.slice(0, 1).toUpperCase()}</div><div><div className="title-row"><h1>{dapp.name}</h1>{dapp.is_featured && <span className="eyebrow">Featured</span>}<SocialShare dappId={dapp.id} dappName={dapp.name} /></div><div className="tags"><ChainNetworkBadge chain={dapp.chain} chainId={dapp.contract_chain_id} contractNetwork={dapp.contract_network} />{(dapp.tags || []).map(tag => <span className="tag" key={tag}>{tag}</span>)}</div></div></div></div></section>
+    <section className="page-hero"><div className="container"><Link href="/explore" className="back-link"><ArrowLeft size={14} /> Back to Marketplace</Link><div className="detail-title"><div className="dapp-icon accent-blue">{dapp.name.slice(0, 1).toUpperCase()}</div><div><div className="title-row"><h1>{dapp.name}</h1>{dapp.is_featured && <span className="eyebrow">Featured</span>}<SocialShare dappId={dapp.id} dappName={dapp.name} /></div><div className="tags"><ChainNetworkBadge chain={dapp.chain} chainId={dapp.contract_chain_id} network={dapp.contract_network || (dapp.chain === "solana" ? "devnet" : null)} />{(dapp.tags || []).map(tag => <span className="tag" key={tag}>{tag}</span>)}</div></div></div></div></section>
     <section className="app-section"><div className="container form-stack">
       {error && <div className="error-box">{error}</div>}
       <div className="audit-layout"><div className="form-stack">
-        <section className="panel"><div className="panel-head"><span className="panel-title">About this dApp</span><span className="points-pill">{dapp.publisher_points || 0} pts</span></div><div className="panel-body"><p className="detail-copy">{dapp.description || "An onchain application generated with Dappster."}</p><p className="detail-note">Published by {dapp.publisher_username ? <Link href={`/creator/${encodeURIComponent(dapp.publisher_username)}`}>{owner}</Link> : owner}. Verify the contract address before interacting with any onchain application.</p></div></section>
+        <section className="panel"><div className="panel-head"><span className="panel-title">About this dApp</span></div><div className="panel-body"><p className="detail-copy">{dapp.description || "An onchain application generated with Dappster."}</p><p className="detail-note">Published by {owner}. Verify the contract address before interacting with any onchain application.</p></div></section>
         <details className="panel collapsible-panel"><summary className="panel-head"><span className="panel-title"><FileCode2 size={15} /> {contractFilename}</span><span className="collapsible-panel-status">{dapp.marketplace?.source.unlocked && <span className="status"><span className="status-dot" /> Available</span>}<ChevronDown className="collapsible-chevron" size={17} aria-hidden="true" /></span></summary>{dapp.contract_code ? <><div className="source-file-toolbar"><span>Smart contract source</span><button className="btn btn-ghost" type="button" onClick={() => downloadSourceFile(contractFilename, dapp.contract_code!)}><Download size={14} /> Download</button></div><pre className="marketplace-code">{dapp.contract_code}</pre></> : lockedAsset("source") || <div className="panel-body mode-notice">No source code is stored for this project.</div>}</details>
         <details className="panel collapsible-panel"><summary className="panel-head"><span className="panel-title"><FileCode2 size={15} /> App.tsx</span><span className="collapsible-panel-status">{dapp.marketplace?.frontend.unlocked && <span className="status"><span className="status-dot" /> Available</span>}<ChevronDown className="collapsible-chevron" size={17} aria-hidden="true" /></span></summary>{dapp.frontend_code ? <><div className="source-file-toolbar"><span>Frontend source</span><button className="btn btn-ghost" type="button" onClick={() => downloadSourceFile("App.tsx", dapp.frontend_code!)}><Download size={14} /> Download</button></div><pre className="marketplace-code">{dapp.frontend_code}</pre></> : lockedAsset("frontend") || <div className="panel-body mode-notice">No frontend source code is stored for this project.</div>}</details>
         <details className="panel collapsible-panel"><summary className="panel-head"><span className="panel-title"><FileCode2 size={15} /> Deploy.md</span><span className="collapsible-panel-status"><span className="status"><span className="status-dot" /> Available</span><ChevronDown className="collapsible-chevron" size={17} aria-hidden="true" /></span></summary><div className="source-file-toolbar"><span>Verified deployment manifest</span><button className="btn btn-ghost" type="button" onClick={() => downloadSourceFile("Deploy.md", deployReadme)}><Download size={14} /> Download</button></div><pre className="marketplace-code">{deployReadme}</pre></details>
@@ -198,6 +198,7 @@ export function DappDetailClient({ id }: { id: string }) {
         {dapp.viewer?.isOwner && <><section className="panel"><div className="panel-head"><span className="panel-title">Deployed-contract audit</span><span className="chain-badge">25 credits</span></div><div className="panel-body form-stack"><p className="detail-note">Run a fresh premium audit against the exact source associated with this deployed address.</p><button className="btn btn-outline btn-block" type="button" disabled={auditing || !dapp.contract_address || !dapp.contract_code} onClick={auditDeployedContract}>{auditing ? <Loader2 className="animate-spin" size={15} /> : <ShieldCheck size={15} />}{auditing ? "Auditing deployed contract..." : dapp.audit_report ? "Run audit again" : "Audit deployed contract"}</button></div></section>
         <section className="panel"><div className="panel-head"><span className="panel-title">Creator marketplace</span><span className="chain-badge">90% creator revenue</span></div><div className="panel-body form-stack"><p className="detail-note">Choose what visitors can access. Paid purchases are permanent and verified in USDC.</p><div className="marketplace-setting"><div><strong>Live app on IPFS</strong><small>Show or hide the launch link independently from the frontend source code.</small></div><button type="button" role="switch" aria-checked={appVisible} className={`visibility-toggle ${appVisible ? "active" : ""}`} onClick={() => setAppVisible(value => !value)}><span>{appVisible ? "Viewable" : "Hidden"}</span><i aria-hidden="true" /></button></div><div><label className="form-label" htmlFor="base-payout">Base payout address</label><input id="base-payout" className="input mono" value={payouts.base} onChange={event => setPayouts(current => ({ ...current, base: event.target.value }))} placeholder="0x…" /></div><div><label className="form-label" htmlFor="solana-payout">Solana payout address</label><input id="solana-payout" className="input mono" value={payouts.solana} onChange={event => setPayouts(current => ({ ...current, solana: event.target.value }))} placeholder="Base58 address" /></div>{settings && assets.map(asset => <div className="marketplace-setting" key={asset.id}><div><strong>{asset.title}</strong><small>{asset.description}</small></div><select className="select" aria-label={`${asset.title} visibility`} value={settings[asset.id].visibility} onChange={event => setSettings(current => current ? { ...current, [asset.id]: { ...current[asset.id], visibility: event.target.value as AssetVisibility } } : current)}><option value="private">Private</option><option value="free">Free</option><option value="paid">Paid</option></select>{settings[asset.id].visibility === "paid" && <label><span>Price</span><input className="input" aria-label={`${asset.title} price in USDC`} type="number" min="1" max="10000" step="0.01" value={settings[asset.id].price} onChange={event => setSettings(current => current ? { ...current, [asset.id]: { ...current[asset.id], price: Number(event.target.value) } } : current)} /><em>USDC</em></label>}</div>)}<button className="btn btn-primary btn-block" type="button" disabled={saving} onClick={saveMarketplace}>{saving ? <Loader2 className="animate-spin" size={15} /> : <Save size={15} />}{saving ? "Saving..." : "Save marketplace settings"}</button></div></section></>}
         <section className="panel"><div className="panel-body trust-line"><Code2 size={18} /><div><strong>Onchain verification</strong><small>The contract address remains public. Source, frontend, and audit access are controlled independently.</small></div></div></section>
+        <DappIdentityPanel dappId={dapp.id} isOwner={Boolean(dapp.viewer?.isOwner)} chain={dapp.chain} chainId={dapp.contract_chain_id} contractAddress={dapp.contract_address} ipfsHash={dapp.ipfs_hash} auditReady={dapp.audit_status === "completed"} release={dapp.registry_release} onConfirmed={load} />
       </aside></div>
     </div></section>
   </>

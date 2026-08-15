@@ -9,6 +9,7 @@ import { assertRequiredDeploymentFee } from "@/lib/deployment-fee"
 import { getSupportedEvmChain } from "@/lib/evm-chains"
 import { repairEvmContract } from "@/lib/ai"
 import { enforceRateLimit } from "@/lib/rate-limit"
+import { hydrateDappSources } from "@/lib/source-storage"
 
 export const runtime = "nodejs"
 
@@ -25,19 +26,20 @@ export async function POST(request: Request) {
     const input = schema.parse(await request.json())
     if (!getSupportedEvmChain(input.chainId)) throw new Error("Unsupported EVM deployment network")
     const localDapp = user.isDemo ? localGetDapp(input.dappId) : undefined
-    const rows = user.isDemo ? [] : await supabaseRequest<{ contract_code: string; name: string }[]>({
+    const rows = user.isDemo ? [] : await supabaseRequest<{ contract_code: string | null; name: string; source_bundle_path: string | null; source_bundle_hash: string | null }[]>({
       path: "dapps",
-      query: { id: `eq.${input.dappId}`, owner_id: `eq.${user.id}`, select: "contract_code,name", limit: "1" },
+      query: { id: `eq.${input.dappId}`, owner_id: `eq.${user.id}`, select: "contract_code,name,source_bundle_path,source_bundle_hash", limit: "1" },
     })
     if (!user.isDemo && !rows[0]) throw new Error("dApp not found")
-    const contractCode = localDapp?.contract_code || rows[0]?.contract_code || input.contractCode
-    const contractName = input.contractName || localDapp?.name || rows[0]?.name
+    const storedDapp = rows[0] ? await hydrateDappSources(rows[0]) : undefined
+    const contractCode = localDapp?.contract_code || storedDapp?.contract_code || input.contractCode
+    const contractName = input.contractName || localDapp?.name || storedDapp?.name
     if (!contractCode) throw new Error("Generated contract not found")
     assertRequiredDeploymentFee(contractCode)
     try {
       return NextResponse.json(compileSolidity(contractCode, contractName, { chainId: input.chainId }))
     } catch (error) {
-      enforceRateLimit(`compile-repair:${user.id}`, 3)
+      await enforceRateLimit(`compile-repair:${user.id}`, 3)
       const compilerError = error instanceof Error ? error.message : "Unknown Solidity compilation error"
       const repairedSource = await repairEvmContract(contractCode, compilerError)
       assertRequiredDeploymentFee(repairedSource)

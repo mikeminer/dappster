@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **dappster.fun** (1144 symbols, 2559 relationships, 91 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **dappster** (1348 symbols, 3182 relationships, 107 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 
@@ -25,10 +25,10 @@ This project is indexed by GitNexus as **dappster.fun** (1144 symbols, 2559 rela
 
 | Resource | Use for |
 |----------|---------|
-| `gitnexus://repo/dappster.fun/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/dappster.fun/clusters` | All functional areas |
-| `gitnexus://repo/dappster.fun/processes` | All execution flows |
-| `gitnexus://repo/dappster.fun/process/{name}` | Step-by-step execution trace |
+| `gitnexus://repo/dappster/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/dappster/clusters` | All functional areas |
+| `gitnexus://repo/dappster/processes` | All execution flows |
+| `gitnexus://repo/dappster/process/{name}` | Step-by-step execution trace |
 
 ## CLI
 

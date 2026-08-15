@@ -1,15 +1,16 @@
 import { NextRequest, NextResponse } from "next/server"
 
-function applicationPolicy(nonce?: string) {
+function applicationPolicy() {
   return [
     "default-src 'self'",
     "base-uri 'self'",
     "object-src 'none'",
     "frame-ancestors 'none'",
     "form-action 'self'",
-    nonce
-      ? `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`
-      : "script-src 'self' 'unsafe-inline'",
+    // App Router emits inline bootstrap scripts for statically cached pages.
+    // A per-request nonce cannot match cached HTML, so it blocks hydration and
+    // leaves client islands (including wallet login) on their loading fallback.
+    "script-src 'self' 'unsafe-inline'",
     "script-src-attr 'none'",
     "style-src 'self' 'unsafe-inline'",
     "style-src-attr 'unsafe-inline'",
@@ -30,7 +31,7 @@ function isolatedBuilderPolicy() {
     "object-src 'none'",
     "frame-ancestors 'none'",
     "form-action 'none'",
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://dappster.fun https://cdn.tailwindcss.com https://unpkg.com https://cdn.jsdelivr.net",
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://unpkg.com https://cdn.jsdelivr.net https://esm.sh",
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob: https:",
     "font-src 'self' data: https:",
@@ -49,7 +50,7 @@ function isolatedIpfsPolicy(allowWalletInjection: boolean) {
     "object-src 'none'",
     "frame-ancestors 'self'",
     "form-action 'none'",
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://dappster.fun https://cdn.tailwindcss.com https://unpkg.com https://cdn.jsdelivr.net",
+    "script-src 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://unpkg.com https://cdn.jsdelivr.net https://esm.sh",
     "style-src 'unsafe-inline' https:",
     "img-src data: blob: https:",
     "font-src data: https:",
@@ -63,16 +64,11 @@ function isolatedIpfsPolicy(allowWalletInjection: boolean) {
 export function middleware(request: NextRequest) {
   const isBuilder = request.nextUrl.pathname === "/build"
   const isIpfs = request.nextUrl.pathname.startsWith("/ipfs/")
-  const isNonceProtectedPage = ["/build", "/audit", "/dashboard", "/login"].includes(request.nextUrl.pathname)
-    || request.nextUrl.pathname.startsWith("/admin/")
-    || request.nextUrl.pathname.startsWith("/dapp/")
   const hostname = (request.headers.get("host") || request.nextUrl.hostname).split(":")[0].toLowerCase()
   const isDappRuntimeHost = hostname === "dappster-fun.vercel.app" || hostname === "apps.dappster.fun"
-  const nonce = isNonceProtectedPage ? btoa(crypto.randomUUID()) : undefined
-  const policy = isBuilder ? isolatedBuilderPolicy() : isIpfs ? isolatedIpfsPolicy(isDappRuntimeHost) : applicationPolicy(nonce)
+  const policy = isBuilder ? isolatedBuilderPolicy() : isIpfs ? isolatedIpfsPolicy(isDappRuntimeHost) : applicationPolicy()
   const requestHeaders = new Headers(request.headers)
   requestHeaders.set("Content-Security-Policy", policy)
-  if (!isBuilder && !isIpfs && nonce) requestHeaders.set("x-nonce", nonce)
 
   const response = NextResponse.next({ request: { headers: requestHeaders } })
   response.headers.set("Content-Security-Policy", policy)

@@ -9,6 +9,8 @@ import { accountHasWallet } from "@/lib/accounts"
 import { compileSolanaProgram, createSolanaProgramKeypair, quoteSolanaProgramDeployment, solanaDeployFundingMemo } from "@/lib/solana-program-deploy"
 import { repairGeneratedContract } from "@/lib/ai"
 import { enforceRateLimit } from "@/lib/rate-limit"
+import { hydrateDappSources } from "@/lib/source-storage"
+import { injectCompiledSolanaIdl } from "@/lib/solana-frontend"
 
 export const runtime = "nodejs"
 export const maxDuration = 300
@@ -24,11 +26,11 @@ export async function POST(request: Request) {
     const user = await getRequestUser(request)
     const input = schema.parse(await request.json())
     const localDapp = user.isDemo ? localGetDapp(input.dappId) : undefined
-    const rows = user.isDemo ? [] : await supabaseRequest<{ chain: string; contract_code: string; contract_address: string | null }[]>({
+    const rows = user.isDemo ? [] : await supabaseRequest<{ chain: string; contract_code: string | null; frontend_code: string | null; contract_address: string | null; source_bundle_path: string | null; source_bundle_hash: string | null }[]>({
       path: "dapps",
-      query: { id: `eq.${input.dappId}`, owner_id: `eq.${user.id}`, select: "chain,contract_code,contract_address", limit: "1" },
+      query: { id: `eq.${input.dappId}`, owner_id: `eq.${user.id}`, select: "chain,contract_code,frontend_code,contract_address,source_bundle_path,source_bundle_hash", limit: "1" },
     })
-    const dapp = localDapp || rows[0]
+    const dapp = localDapp || (rows[0] ? await hydrateDappSources(rows[0]) : undefined)
     if (!dapp || (localDapp && localDapp.owner_id !== user.id)) throw new Error("dApp non trovata")
     if (dapp.chain !== "solana" || !dapp.contract_code) throw new Error("Codice del programma Solana non trovato")
     if (dapp.contract_address) throw new Error("Il programma Solana è già stato distribuito")
@@ -47,12 +49,20 @@ export async function POST(request: Request) {
     } catch (error) {
       const compilerError = error instanceof Error ? error.message : "Unknown Solana compilation error"
       if (!compilerError.includes("Compilazione del programma Solana non riuscita")) throw error
-      enforceRateLimit(`compile-repair:${user.id}:solana`, 3)
+      await enforceRateLimit(`compile-repair:${user.id}:solana`, 3)
       const repairedSource = await repairGeneratedContract("solana", dapp.contract_code, compilerError)
-      await compileSolanaProgram(repairedSource, program.publicKey.toBase58())
-      if (user.isDemo) localUpdateDapp(input.dappId, { contract_code: repairedSource })
-      else await supabaseRequest({ path: "dapps", method: "PATCH", query: { id: `eq.${input.dappId}`, owner_id: `eq.${user.id}` }, body: { contract_code: repairedSource, updated_at: new Date().toISOString() } })
+      const repairedBuild = await compileSolanaProgram(repairedSource, program.publicKey.toBase58())
+      const repairedFrontend = dapp.frontend_code
+        ? injectCompiledSolanaIdl(dapp.frontend_code, repairedBuild.idl, program.publicKey.toBase58())
+        : undefined
+      if (user.isDemo) localUpdateDapp(input.dappId, { contract_code: repairedSource, ...(repairedFrontend ? { frontend_code: repairedFrontend } : {}) })
+      else await supabaseRequest({ path: "dapps", method: "PATCH", query: { id: `eq.${input.dappId}`, owner_id: `eq.${user.id}` }, body: { contract_code: repairedSource, ...(repairedFrontend ? { frontend_code: repairedFrontend } : {}), updated_at: new Date().toISOString() } })
       return NextResponse.json({ status: "repaired", repairedSource })
+    }
+    if (dapp.frontend_code) {
+      const frontendCode = injectCompiledSolanaIdl(dapp.frontend_code, built.idl, program.publicKey.toBase58())
+      if (user.isDemo) localUpdateDapp(input.dappId, { frontend_code: frontendCode })
+      else await supabaseRequest({ path: "dapps", method: "PATCH", query: { id: `eq.${input.dappId}`, owner_id: `eq.${user.id}` }, body: { frontend_code: frontendCode, updated_at: new Date().toISOString() } })
     }
     const quote = await quoteSolanaProgramDeployment(built.byteLength, input.cluster)
     const jobKey = createHash("sha256").update(`${input.dappId}:${input.cluster}:${input.wallet}:${sourceHash}`).digest("hex")

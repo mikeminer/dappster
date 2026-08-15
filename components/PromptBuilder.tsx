@@ -56,21 +56,10 @@ type InjectedEvmProvider = {
   isMetaMask?: boolean
   isRabby?: boolean
   isZerion?: boolean
-  isCoinbaseWallet?: boolean
 }
 
 function isZerionProvider(provider: unknown) {
-  const root = provider as InjectedEvmProvider | undefined
-  return Boolean(root?.isZerion || root?.providers?.some(candidate => candidate.isZerion))
-}
-
-function prefersFactoryDeployment(connectorId: string, provider: unknown) {
-  const root = provider as InjectedEvmProvider | undefined
-  const isCoinbaseWallet = Boolean(root?.isCoinbaseWallet || root?.providers?.some(candidate => candidate.isCoinbaseWallet))
-  return connectorId === "walletConnect"
-    || /(?:zerion|coinbase)/i.test(connectorId)
-    || isZerionProvider(provider)
-    || isCoinbaseWallet
+  return Boolean((provider as InjectedEvmProvider | undefined)?.isZerion)
 }
 
 function selectDeploymentProvider(injected: unknown, chainId: number) {
@@ -269,12 +258,10 @@ function transactionMatchesFunding(transaction: ParsedTransactionWithMeta | null
 
 async function recoverConfirmedSolanaFunding(connection: Connection, quote: SolanaDeploymentQuote, wallet: PublicKey) {
   const payer = new PublicKey(quote.payer)
-  const rpcConnections = Array.from(new Set([connection.rpcEndpoint, clusterApiUrl(quote.cluster)]))
-    .map(endpoint => endpoint === connection.rpcEndpoint ? connection : new Connection(endpoint, "confirmed"))
-  const retryRead = async <T,>(operation: (rpc: Connection) => Promise<T>) => {
+  const retryRead = async <T,>(operation: () => Promise<T>) => {
     for (let attempt = 0; ; attempt += 1) {
       try {
-        return await operation(rpcConnections[attempt % rpcConnections.length])
+        return await operation()
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         if (!/(?:\b429\b|too many requests|rate[ -]?limit)/i.test(message) || attempt >= 6) throw error
@@ -283,23 +270,25 @@ async function recoverConfirmedSolanaFunding(connection: Connection, quote: Sola
       }
     }
   }
-  const recent = await retryRead(rpc => rpc.getSignaturesForAddress(payer, { limit: 25 }, "confirmed"))
+  const recent = await retryRead(() => connection.getSignaturesForAddress(payer, { limit: 25 }, "confirmed"))
   if (!recent.length) return null
-
-  // getSignaturesForAddress already returns each transaction memo. Use the
-  // unique deployment memo to select one signature instead of downloading up
-  // to 25 transactions, which public RPCs frequently reject with HTTP 429.
-  for (const candidate of recent.filter(item => item.memo === quote.memo)) {
-    const transaction = await retryRead(rpc => rpc.getParsedTransaction(candidate.signature, {
+  // Public Solana RPCs frequently reject a 25-item getTransactions batch.
+  // Read small groups with exponential backoff and stop as soon as the
+  // unique funding memo is found, avoiding both duplicate transfers and 429s.
+  for (let offset = 0; offset < recent.length; offset += 5) {
+    const signatures = recent.slice(offset, offset + 5)
+    const transactions = await retryRead(() => connection.getParsedTransactions(signatures.map(item => item.signature), {
       commitment: "confirmed",
       maxSupportedTransactionVersion: 0,
     }))
-    if (transactionMatchesFunding(transaction, {
+    const index = transactions.findIndex(transaction => transactionMatchesFunding(transaction, {
       wallet,
       payer,
       lamports: quote.requiredLamports,
       memo: quote.memo,
-    })) return candidate.signature
+    }))
+    if (index >= 0) return signatures[index].signature
+    if (offset + 5 < recent.length) await new Promise(resolve => setTimeout(resolve, 250))
   }
   return null
 }
@@ -407,22 +396,8 @@ export function PromptBuilder() {
         contract_network?: string | null
         ipfs_hash?: string
         ipfs_url?: string
-      }>(`/api/dapps/${projectId}`).then(async project => {
-        if (!project.contract_code || !project.frontend_code) {
-          const stored = JSON.parse(localStorage.getItem(PENDING_GENERATION_KEY) || "null") as PreparedGeneration | null
-          const pending = stored?.dappId === project.id ? stored : null
-          if (!pending) throw new Error("This generation was interrupted before its recoverable job was recorded. Generate it again or delete this incomplete project from the Dashboard.")
-          setChain(pending.chain)
-          setPrompt(pending.prompt)
-          if (pending.evmChainId && getSupportedEvmChain(pending.evmChainId)) setEvmChainId(pending.evmChainId)
-          if (pending.solanaCluster) setSolanaCluster(pending.solanaCluster)
-          localStorage.setItem(PENDING_GENERATION_KEY, JSON.stringify(pending))
-          const runId = ++generationRunRef.current
-          setLoading(true)
-          const recovered = await recoverPreparedGeneration(pending, 132, runId)
-          if (!recovered) throw new Error("Generation is still processing. Dappster will keep this project recoverable; return to it from the Dashboard in a few minutes.")
-          return
-        }
+      }>(`/api/dapps/${projectId}`).then(project => {
+        if (!project.contract_code || !project.frontend_code) throw new Error("This generated project is incomplete or unavailable")
         setChain(project.chain)
         setPrompt(project.description || `Resume deployment of ${project.name}`)
         setGeneration({
@@ -459,13 +434,9 @@ export function PromptBuilder() {
         if (project.ipfs_hash || project.ipfs_url) setDeployment({ cid: project.ipfs_hash || "published", url: project.ipfs_url || resolveIpfsUrl(project.ipfs_hash) || "", creditsRemaining: 0, status: "live" })
         setTab("contract")
       }).catch(cause => setError(cause instanceof Error ? cause.message : "Saved project could not be loaded"))
-        .finally(() => setLoading(false))
       return
     }
     localStorage.removeItem("dappster-projects")
-    // The recovery helper closes over stable setters; depending on its
-    // per-render identity would restart the same long-running recovery loop.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setSolanaCluster])
 
   function applyRecoveredGeneration(project: SavedGenerationProject, pending: PreparedGeneration) {
@@ -500,10 +471,10 @@ export function PromptBuilder() {
       } catch {
         // The authenticated project may still be committing after a suspended request.
       }
-      // Retry only after the original five-minute server budget has expired.
-      // Reusing the same dApp and burn proof keeps credit synchronization
-      // idempotent without starting concurrent model calls.
-      if (attempt === 124) {
+      // Retry the durable job once near the beginning (for a fast provider
+      // failure) and once after the five-minute worker lease can expire. Avoid
+      // repeated POSTs so recovery cannot consume the generation rate limit.
+      if (attempt === 4 || attempt === 124) {
         try {
           const output = await apiFetch<Generation>("/api/generate", {
             method: "POST",
@@ -526,7 +497,7 @@ export function PromptBuilder() {
           rememberProject(output, pending.prompt, pending.chain, undefined, undefined, pending.evmChainId, pending.solanaCluster)
           return true
         } catch {
-          // The original request may still be finishing; keep polling.
+          // A live worker still owns the lease or the retry delay has not elapsed.
         }
       }
       if (attempt + 1 < attempts) await new Promise(resolve => window.setTimeout(resolve, 2500))
@@ -551,6 +522,8 @@ export function PromptBuilder() {
     setDeployment(null)
     let prepared: PreparedGeneration | null = null
     try {
+      const creditBurn = await burnCreditsFromUserWallet(5, `${requestedChain} dApp generation`)
+      if (controller.signal.aborted) throw new DOMException("Generation canceled", "AbortError")
       let savedPending = JSON.parse(localStorage.getItem(PENDING_GENERATION_KEY) || "null") as PreparedGeneration | null
       if (savedPending?.dappId) {
         const workspace = await apiFetch<{ dapps?: Array<{ id: string }> }>("/api/me")
@@ -561,25 +534,13 @@ export function PromptBuilder() {
       }
       if (savedPending?.dappId) {
         if (savedPending.prompt !== requestedPrompt || savedPending.chain !== requestedChain || savedPending.evmChainId !== requestedEvmChainId) {
-          const oldProject = await apiFetch<SavedGenerationProject>(`/api/dapps/${savedPending.dappId}`).catch(() => null)
-          const stale = Date.now() - savedPending.startedAt > 20 * 60 * 1000
-          if ((oldProject?.contract_code && oldProject.frontend_code) || stale) {
-            clearPendingCreditBurn(savedPending.creditBurn)
-            localStorage.removeItem(PENDING_GENERATION_KEY)
-            savedPending = null
-          } else {
-            throw new Error("Another generation is still processing. Open that project from the Dashboard to recover it before starting a different one.")
-          }
+          throw new Error("Another generation is still pending. Wait for Dappster to recover it before starting a different project.")
         }
-      }
-      const creditBurn = savedPending?.creditBurn ?? await burnCreditsFromUserWallet(5, `${requestedChain} dApp generation`)
-      if (controller.signal.aborted) throw new DOMException("Generation canceled", "AbortError")
-      if (savedPending?.dappId) {
         prepared = { ...savedPending, creditBurn }
       } else {
         const created = await apiFetch<Array<{ id: string }>>("/api/dapps", {
           method: "POST",
-          body: JSON.stringify({ name: "Generating dApp", description: requestedPrompt, chain: requestedChain, contract_network: requestedSolanaCluster, tags: [] }),
+          body: JSON.stringify({ name: "Generating dApp", description: requestedPrompt, chain: requestedChain, tags: [] }),
           signal: controller.signal,
         })
         if (!created[0]?.id) throw new Error("Dappster could not prepare a recoverable generation")
@@ -631,7 +592,7 @@ export function PromptBuilder() {
   async function publishFrontend(currentContract: ContractDeployment) {
     if (!generation) return
     setDeployStage("burning")
-    const creditBurn = await burnCreditsFromUserWallet(2, `${chain.toUpperCase()} IPFS frontend deployment`)
+    const creditBurn = await burnCreditsFromUserWallet(2, "IPFS frontend deployment")
     setDeployStage("pinning")
     const output = await apiFetch<Deployment>("/api/deploy", {
       method: "POST",
@@ -924,7 +885,7 @@ export function PromptBuilder() {
         bytecode: compiled.bytecode,
         args,
       })
-      const useFactoryDeployment = prefersFactoryDeployment(connectedWallet.connector.id, provider)
+      const useFactoryDeployment = connectedWallet.connector.id === "walletConnect" || isZerionProvider(provider)
 
       if (useFactoryDeployment) {
         const hasOwner = compiled.abi.some(item => item.type === "function" && item.name === "owner" && item.inputs.length === 0)
@@ -1146,7 +1107,7 @@ export function PromptBuilder() {
           {chain === "solana" && <div><label className="form-label" htmlFor="solana-network">Solana deployment cluster</label><select id="solana-network" className="select" value={solanaCluster} disabled={Boolean(deployStage || contractDeployment)} onChange={event => setSolanaCluster(event.target.value as SolanaDeploymentCluster)}><option value="devnet">Devnet · recommended for testing</option><option value="mainnet-beta">Mainnet Beta</option></select><div style={{color:"#707883",fontSize:10,lineHeight:1.5,marginTop:7}}>Dappster verifies the selected cluster before Phantom signs anything. You fund the disclosed technical wallet on that cluster; Dappster does not use Mainnet SOL for a Devnet deployment.</div></div>}
           {chain === "sui" && <div><label className="form-label" htmlFor="sui-wallet">Sui testnet wallet</label><select id="sui-wallet" className="select" value={suiWalletName} disabled={Boolean(deployStage || contractDeployment)} onChange={event => setSuiWalletName(event.target.value)}><option value="">Select a Sui wallet</option>{suiWallets.map(wallet => <option value={wallet.name} key={wallet.name}>{wallet.name}</option>)}</select><div style={{color:"#707883",fontSize:10,lineHeight:1.5,marginTop:7}}>The selected wallet publishes the Move package directly on Sui testnet and pays its gas. Dappster never takes custody of the wallet.</div></div>}
           {chain === "aptos" && <div><label className="form-label" htmlFor="aptos-wallet">Aptos devnet wallet</label><select id="aptos-wallet" className="select" value={aptosWalletName} disabled={Boolean(deployStage || contractDeployment)} onChange={event => setAptosWalletName(event.target.value)}><option value="">Select an Aptos wallet</option>{aptos.wallets.map(wallet => <option value={wallet.name} key={wallet.name}>{wallet.name}</option>)}</select><div style={{color:"#707883",fontSize:10,lineHeight:1.5,marginTop:7}}>The selected wallet publishes the Move package directly on Aptos devnet and pays its gas. Dappster never takes custody of the wallet.</div></div>}
-          <div><label className="form-label" htmlFor="prompt">What do you want to build?</label><textarea id="prompt" className="textarea" minLength={1} maxLength={600} value={prompt} onChange={event => setPrompt(event.target.value)} placeholder={`e.g. ${selectedAdapter.samplePrompts[0]}`} /><div style={{display:"flex",justifyContent:"space-between",marginTop:7,color:"#5f6670",fontSize:10}}><span>Be specific about roles and behavior.</span><span>{prompt.length}/600</span></div></div>
+          <div><label className="form-label" htmlFor="prompt">What do you want to build?</label><textarea id="prompt" className="textarea" maxLength={4000} value={prompt} onChange={event => setPrompt(event.target.value)} placeholder={`e.g. ${selectedAdapter.samplePrompts[0]}`} /><div style={{display:"flex",justifyContent:"space-between",marginTop:7,color:"#5f6670",fontSize:10}}><span>Be specific about roles and behavior.</span><span>{prompt.length}/4000</span></div></div>
           <div>
             <div className="example-library-heading">
               <label className="form-label" id="example-prompts-label">Try an example</label>

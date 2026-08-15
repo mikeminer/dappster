@@ -16,3 +16,21 @@ export async function deployFrontendToIPFS(dappId: string, frontendCode: string,
   if (!cid) throw new Error("Pinata did not return a CID")
   return { cid, url: ipfsGatewayUrl(cid) }
 }
+
+export async function deployJsonToIPFS(name: string, json: string) {
+  if (!process.env.PINATA_JWT) throw new Error("PINATA_JWT is not configured")
+  const form = new FormData()
+  form.append("file", new Blob([json], { type: "application/json" }), `${name}.json`)
+  form.append("network", "public")
+  form.append("pinataMetadata", JSON.stringify({ name }))
+  const response = await fetch("https://uploads.pinata.cloud/v3/files", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${process.env.PINATA_JWT}` },
+    body: form,
+  })
+  if (!response.ok) throw new Error(`IPFS manifest upload failed (${response.status})`)
+  const payload = await response.json() as { data?: { cid?: string }; IpfsHash?: string }
+  const cid = payload.data?.cid || payload.IpfsHash
+  if (!cid) throw new Error("Pinata did not return a manifest CID")
+  return { cid, url: ipfsGatewayUrl(cid) }
+}

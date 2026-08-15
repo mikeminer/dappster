@@ -33,9 +33,9 @@ const evmChainBrands: Record<number, ChainBrand> = {
   11155111: { name: "Sepolia", logo: "/chain-logos/ethereum.svg" },
 }
 
-export function getChainBrand(chain: Chain, chainId?: number | null, contractNetwork?: string | null): ChainBrand {
+export function getChainBrand(chain: Chain, chainId?: number | null, network?: string | null): ChainBrand {
   if (chain === "solana") return {
-    name: contractNetwork?.toLowerCase() === "devnet" ? "Solana · Devnet" : "Solana",
+    name: network === "devnet" ? "Solana · Devnet" : "Solana",
     logo: "/chain-logos/solana.svg",
   }
   const nonEvm: Partial<Record<Chain, ChainBrand>> = {

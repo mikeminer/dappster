@@ -3,6 +3,7 @@ import { z } from "zod"
 import { getRequestUser } from "@/lib/runtime"
 import { supabaseRequest } from "@/lib/supabase"
 import type { AssetVisibility } from "@/lib/marketplace"
+import { hydrateDappSources } from "@/lib/source-storage"
 
 const schema = z.object({ dappId: z.string().uuid() })
 
@@ -14,6 +15,8 @@ type DeployableDapp = {
   chain: "evm" | "solana"
   contract_code: string | null
   frontend_code: string | null
+  source_bundle_path: string | null
+  source_bundle_hash: string | null
   tags: string[] | null
   deploy_visibility: AssetVisibility
 }
@@ -23,15 +26,16 @@ export async function POST(request: Request) {
     const user = await getRequestUser(request)
     if (user.isDemo) throw new Error("Sign in to Dappster before using Fast Deploy")
     const input = schema.parse(await request.json())
-    const dapp = (await supabaseRequest<DeployableDapp[]>({
+    const storedDapp = (await supabaseRequest<DeployableDapp[]>({
       path: "dapps",
       query: {
         id: `eq.${input.dappId}`,
         is_listed: "eq.true",
-        select: "id,owner_id,name,description,chain,contract_code,frontend_code,tags,deploy_visibility",
+        select: "id,owner_id,name,description,chain,contract_code,frontend_code,source_bundle_path,source_bundle_hash,tags,deploy_visibility",
         limit: "1",
       },
     }))[0]
+    const dapp = storedDapp ? await hydrateDappSources(storedDapp) : undefined
     if (!dapp?.contract_code || !dapp.frontend_code) throw new Error("This dApp does not contain a complete deployable project")
 
     if (dapp.owner_id !== user.id) {

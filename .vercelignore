@@ -2,6 +2,7 @@
 .next
 .next-*
 .gitnexus
+.codex-tmp-solana-close
 .cargo-target
 contracts/**/target
 tmp

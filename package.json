@@ -1,12 +1,8 @@
 {
   "name": "dappster",
   "version": "0.1.0",
-  "license": "BUSL-1.1",
   "private": true,
   "scripts": {
-    "solana:runtime": "node scripts/build-solana-browser-runtime.mjs",
-    "predev": "pnpm solana:runtime",
-    "prebuild": "pnpm solana:runtime",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
@@ -16,10 +12,7 @@
     "qa:solidity-targets": "node --no-warnings --experimental-strip-types scripts/qa-solidity-targets.mts",
     "qa:evm-wallets": "node scripts/qa-evm-wallet-requests.mjs",
     "qa:evm-factory": "node scripts/verify-deployment-factory.mjs",
-    "qa:ipfs-gateways": "node --no-warnings --experimental-strip-types scripts/qa-ipfs-gateways.mts",
-    "qa:preview-runtime": "node scripts/qa-preview-runtime.mjs",
-    "qa:xai-provider": "node --no-warnings --experimental-strip-types scripts/qa-xai-provider.mts",
-    "qa:tester-tiers": "node --no-warnings --experimental-strip-types scripts/qa-tester-tiers.mts"
+    "qa:solana-frontend": "node --no-warnings --experimental-strip-types scripts/qa-solana-frontend-runtime.mts"
   },
   "dependencies": {
     "@aptos-labs/ts-sdk": "^5.2.1",
@@ -49,6 +42,7 @@
     "bs58": "^6.0.0",
     "buffer": "6.0.3",
     "encoding": "^0.1.13",
+    "esbuild": "0.25.5",
     "got": "11.8.6",
     "keyv": "4.5.4",
     "lucide-react": "^0.468.0",
@@ -67,7 +61,6 @@
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "autoprefixer": "^10.4.19",
-    "esbuild": "0.25.5",
     "eslint": "^8.57.0",
     "eslint-config-next": "15.5.22",
     "postcss": "8.5.25",

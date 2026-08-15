@@ -26,3 +26,23 @@ authority to burn credits for Dappster API usage.
 6. Configure the production public contract/program IDs and relayer credentials.
 
 Never place owner or relayer private keys in `NEXT_PUBLIC_*` variables.
+
+## Verifiable dApp releases on Base
+
+`../DappIdentityRegistry.sol` is a separate, non-upgradeable, append-only registry for
+completed Base releases. A publisher can register a release only while the deployed
+contract's `owner()` is that publisher and its live runtime code hash matches the
+submitted proof. Each release binds:
+
+- the actual creation and runtime bytecode hashes;
+- the exact stored Solidity source hash;
+- the public frontend IPFS CID hash;
+- the canonical AI audit report hash and score;
+- a canonical JSON manifest pinned to IPFS.
+
+Use `/admin/identity-registry` with the linked owner wallet to deploy the registry.
+Then apply `supabase/migrations/20260803_dapp_identity_releases.sql`, configure
+`NEXT_PUBLIC_DAPPSTER_IDENTITY_REGISTRY_ADDRESS`, and redeploy the web application.
+The first production version intentionally supports Base contracts only: the Base
+registry can verify Base bytecode directly, while remote-chain claims require a
+separate cross-chain proof mechanism.

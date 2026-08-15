@@ -8,7 +8,7 @@ import { supabaseRequest } from "@/lib/supabase"
 import { listPublicDappListings, savePublicDappListing } from "@/lib/pinata-listings"
 import { marketplaceAssets, type AssetVisibility, type MarketplaceAsset } from "@/lib/marketplace"
 import { formatPublisher } from "@/lib/publisher"
-import { getAccountPoints } from "@/lib/dappster-points"
+import { deleteDappSourceBundle, hydrateDappSources } from "@/lib/source-storage"
 
 type StoredDapp = Record<string, unknown> & {
   id: string
@@ -29,6 +29,7 @@ type StoredDapp = Record<string, unknown> & {
   deploy_price_usdc?: number | string
   base_payout_address?: string | null
   solana_payout_address?: string | null
+  source_bundle_path?: string | null
 }
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -43,31 +44,57 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     }
     const user = await getOptionalRequestUser(request)
     const rows = await supabaseRequest<StoredDapp[]>({ path: "dapps", query: { id: `eq.${id}`, select: "*", limit: "1" } })
-    const dapp = rows[0]
-    const isOwner = Boolean(user && dapp?.owner_id === user.id)
-    if (!dapp || (!dapp.is_listed && !isOwner)) return NextResponse.json({ error: "dApp not found" }, { status: 404 })
+    const storedDapp = rows[0]
+    const isOwner = Boolean(user && storedDapp?.owner_id === user.id)
+    if (!storedDapp || (!storedDapp.is_listed && !isOwner)) return NextResponse.json({ error: "dApp not found" }, { status: 404 })
+    const dapp = storedDapp
 
-    const [publisherProfiles, publisherWallets, publisherPoints] = await Promise.all([
+    const [publisherProfiles, publisherWallets, purchases, latestAudit, latestRelease] = await Promise.all([
       supabaseRequest<Array<{ username?: string | null }>>({ path: "profiles", query: { id: `eq.${dapp.owner_id}`, select: "username", limit: "1" } }),
       supabaseRequest<Array<{ wallet_address: string; chain: string }>>({ path: "account_wallets", query: { account_id: `eq.${dapp.owner_id}`, select: "wallet_address,chain" } }),
-      getAccountPoints(dapp.owner_id),
+      user && !isOwner
+        ? supabaseRequest<{ asset_type: MarketplaceAsset }[]>({ path: "marketplace_purchases", query: { buyer_id: `eq.${user.id}`, dapp_id: `eq.${dapp.id}`, select: "asset_type" } })
+        : Promise.resolve([]),
+      dapp.audit_status === "completed"
+        ? supabaseRequest<{ report: unknown; severity_counts: unknown; created_at: string }[]>({ path: "audits", query: { dapp_id: `eq.${dapp.id}`, status: "eq.completed", select: "report,severity_counts,created_at", order: "created_at.desc", limit: "1" } }).then(items => items[0] || null)
+        : Promise.resolve(null),
+      supabaseRequest<Array<Record<string, unknown>>>({
+        path: "dapp_releases",
+        query: {
+          dapp_id: `eq.${dapp.id}`,
+          status: "eq.confirmed",
+          select: "release_id,registry_dapp_id,release_version,registry_address,registry_tx_hash,manifest_hash,manifest_cid,manifest_url,runtime_code_hash,source_hash,frontend_cid_hash,audit_report_hash,audit_score,confirmed_at",
+          order: "release_version.desc",
+          limit: "1",
+        },
+      }).then(items => items[0] || null).catch(() => null),
     ])
     const publisherWallet = publisherWallets.find(wallet => wallet.chain === dapp.chain)
     const publisherName = formatPublisher({ username: publisherProfiles[0]?.username, wallet_address: publisherWallet?.wallet_address }, dapp.owner_id)
 
-    const purchases = user && !isOwner
-      ? await supabaseRequest<{ asset_type: MarketplaceAsset }[]>({ path: "marketplace_purchases", query: { buyer_id: `eq.${user.id}`, dapp_id: `eq.${dapp.id}`, select: "asset_type" } })
-      : []
     const purchased = new Set(purchases.map(item => item.asset_type))
     const marketplace = Object.fromEntries(marketplaceAssets.map(asset => {
       const visibility = (dapp[`${asset}_visibility`] || "private") as AssetVisibility
       const price = Number(dapp[`${asset}_price_usdc`] || 5)
       return [asset, { visibility, price, unlocked: isOwner || visibility === "free" || purchased.has(asset), purchased: purchased.has(asset) }]
     })) as Record<MarketplaceAsset, { visibility: AssetVisibility; price: number; unlocked: boolean; purchased: boolean }>
-    const latestAudit = marketplace.audit.unlocked && dapp.audit_status === "completed"
-      ? (await supabaseRequest<{ report: unknown; severity_counts: unknown; created_at: string }[]>({ path: "audits", query: { dapp_id: `eq.${dapp.id}`, status: "eq.completed", select: "report,severity_counts,created_at", order: "created_at.desc", limit: "1" } }))[0]
-      : null
-    const { contract_code, frontend_code, ipfs_hash, ipfs_url, app_visibility, base_payout_address, solana_payout_address, ...publicDapp } = dapp
+    const readableDapp = marketplace.source.unlocked || marketplace.frontend.unlocked
+      ? await hydrateDappSources(dapp)
+      : dapp
+    const {
+      contract_code,
+      frontend_code,
+      ipfs_hash,
+      ipfs_url,
+      app_visibility,
+      base_payout_address,
+      solana_payout_address,
+      source_bundle_path: _sourceBundlePath,
+      source_bundle_hash: _sourceBundleHash,
+      source_bundle_bytes: _sourceBundleBytes,
+      source_storage_version: _sourceStorageVersion,
+      ...publicDapp
+    } = readableDapp
     return NextResponse.json({
       ...publicDapp,
       ...(marketplace.source.unlocked ? { contract_code } : {}),
@@ -75,10 +102,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       ...((isOwner || app_visibility !== false) && (ipfs_hash || ipfs_url) ? { ipfs_hash, ipfs_url } : {}),
       app_visibility: app_visibility !== false,
       publisher_name: publisherName,
-      publisher_username: publisherProfiles[0]?.username || null,
-      publisher_points: publisherPoints?.points || 0,
       ...(marketplace.audit.unlocked && latestAudit ? { audit_report: latestAudit.report, audit_created_at: latestAudit.created_at } : {}),
       ...(isOwner ? { base_payout_address, solana_payout_address } : {}),
+      registry_release: latestRelease,
       marketplace,
       viewer: { isOwner, authenticated: Boolean(user) },
     })
@@ -193,9 +219,9 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
       return NextResponse.json({ ok: true })
     }
 
-    const rows = await supabaseRequest<Array<{ id: string }>>({
+    const rows = await supabaseRequest<Array<{ id: string; source_bundle_path: string | null }>>({
       path: "dapps",
-      query: { id: `eq.${id}`, owner_id: `eq.${user.id}`, select: "id", limit: "1" },
+      query: { id: `eq.${id}`, owner_id: `eq.${user.id}`, select: "id,source_bundle_path", limit: "1" },
     })
     if (!rows[0]) return NextResponse.json({ error: "dApp not found" }, { status: 404 })
 
@@ -204,6 +230,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
       method: "DELETE",
       query: { id: `eq.${id}`, owner_id: `eq.${user.id}` },
     })
+    if (rows[0].source_bundle_path) await deleteDappSourceBundle(rows[0].source_bundle_path).catch(() => {})
     revalidateTag("public-dapps")
     return NextResponse.json({ ok: true })
   } catch (error) {

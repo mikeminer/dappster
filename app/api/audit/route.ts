@@ -6,6 +6,7 @@ import { optionalCreditBurnProofSchema, verifyAndSpendCreditBurn } from "@/lib/c
 import { getRequestUser } from "@/lib/runtime"
 import { localCredits, localSaveAudit, localSpend, localUpdateDapp } from "@/lib/local-store"
 import { supabaseRequest } from "@/lib/supabase"
+import { hydrateDappSources } from "@/lib/source-storage"
 import { CHAIN_IDS } from "@/lib/chain-adapters"
 import { getSolanaTesterEntitlement } from "@/lib/pasta-developer-tier"
 import { getEvmTesterEntitlement } from "@/lib/pappardelle-tester-tier"
@@ -17,10 +18,11 @@ export async function POST(request: Request) {
     const user = await getRequestUser(request)
     const input = requestSchema.parse(await request.json())
     if (input.dappId && !user.isDemo) {
-      const rows = await supabaseRequest<{ contract_code: string; chain: typeof input.chain }[]>({ path: "dapps", query: { id: `eq.${input.dappId}`, owner_id: `eq.${user.id}`, select: "contract_code,chain", limit: "1" } })
-      if (!rows[0]?.contract_code) throw new Error("The deployed dApp source was not found")
-      input.contractCode = rows[0].contract_code
-      input.chain = rows[0].chain
+      const rows = await supabaseRequest<{ contract_code: string | null; source_bundle_path: string | null; source_bundle_hash: string | null; chain: typeof input.chain }[]>({ path: "dapps", query: { id: `eq.${input.dappId}`, owner_id: `eq.${user.id}`, select: "contract_code,source_bundle_path,source_bundle_hash,chain", limit: "1" } })
+      const dapp = rows[0] ? await hydrateDappSources(rows[0]) : undefined
+      if (!dapp?.contract_code) throw new Error("The deployed dApp source was not found")
+      input.contractCode = dapp.contract_code
+      input.chain = dapp.chain
     }
     const cost = input.tier === "basic" ? CREDIT_COSTS.audit_basic : CREDIT_COSTS.audit_premium
     const profile = user.isDemo ? { credits: localCredits(user.id), plan: "free" } : await getCredits(user.id)

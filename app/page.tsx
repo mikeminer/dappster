@@ -54,16 +54,6 @@ export default async function Home() {
             <article className="price-card featured"><div className="popular">MOST POPULAR</div><div className="price-name">Builder</div><div className="price">25 <small>USDC</small></div><p>Buy 300 Dappster Credits for serious shipping.</p><ul className="feature-list"><li>60 AI generations</li><li>12 premium audits</li><li>IPFS deployments</li><li>USDC payment on Base</li></ul><UsdcCheckoutIsland packageId="builder" className="btn btn-primary btn-block" label="Buy 300 credits" /></article>
             <article className="price-card"><div className="price-name">Pro</div><div className="price">39 <small>USDC / 30 days</small></div><p>Unlimited creative room for power builders. Renew from your wallet every 30 days.</p><ul className="feature-list"><li>Unlimited generations</li><li>20 premium audits / month</li><li>Featured listing credit</li><li>USDC on Base · no card</li></ul><UsdcCheckoutIsland packageId="unlimited" className="btn btn-outline btn-block" label="Activate Pro" /></article>
           </div>
-          <div className="tester-tier-grid">
-            <article className="tester-tier-card">
-              <div><div className="section-label">// Solana Tester tier</div><h3>Hold 10,000,000 PASTA</h3><p>Link the qualifying Solana wallet. Unlock unlimited generations on Solana Mainnet and Devnet, plus unlimited security audits.</p></div>
-              <a className="btn btn-primary" href="https://pump.fun/coin/39kMeX4HVRW9qbbiHSPbRQ9xeXUF18GrNP6gL61Ppump" target="_blank" rel="noreferrer">View PASTA</a>
-            </article>
-            <article className="tester-tier-card">
-              <div><div className="section-label">// EVM Tester tier</div><h3>Hold 50,000,000 pappardelle</h3><p>Link the qualifying EVM wallet. Unlock unlimited generations across every EVM network supported by Dappster, plus unlimited security audits.</p></div>
-              <a className="btn btn-primary" href="https://pappardellefaucet.vercel.app/" target="_blank" rel="noreferrer">Get pappardelle</a>
-            </article>
-          </div>
           <section className="credit-burn-guide" aria-labelledby="credit-burn-title">
             <div className="credit-burn-head">
               <div><div className="section-label">// Exact usage costs</div><h3 id="credit-burn-title">How credits are burned</h3></div>
@@ -84,9 +74,9 @@ export default async function Home() {
             <div className="credit-burn-rules">
               <div><Wallet size={18} /><p><strong>You sign every burn</strong><span>The technical wallet cannot burn your credits. You approve <code>burnOwnCredits</code> and pay the small Base gas fee.</span></p></div>
               <div><Flame size={18} /><p><strong>Burn first, then run</strong><span>Dappster verifies the exact amount, linked wallet and unique usage ID before starting the action.</span></p></div>
-              <div><Check size={18} /><p><strong>Token-gated Tester tiers</strong><span>Eligible PASTA holders skip Solana generation and audit burns. Eligible pappardelle holders skip EVM generation and audit burns.</span></p></div>
+              <div><Check size={18} /><p><strong>One balance across chains</strong><span>Solana actions use the same account, but their credits are still burned from your linked EVM wallet on Base.</span></p></div>
             </div>
-            <div className="credit-pro-note"><strong>Pro or Tester tier</strong><span>Pro skips all listed service burns. Solana Tester requires 10,000,000 PASTA; EVM Tester requires 50,000,000 pappardelle. Tester tiers cover matching-ecosystem generations and audits. IPFS and network deployment fees still apply.</span></div>
+            <div className="credit-pro-note"><strong>Active Pro membership</strong><span>No credit burn is required while Pro is active. Normal Base gas and deployment-network fees may still apply.</span></div>
           </section>
         </div>
       </section>

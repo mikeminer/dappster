@@ -1,14 +1,13 @@
 import { NextResponse } from "next/server"
 import type { Abi } from "viem"
 import { injectCompiledAbiIntoFrontend } from "@/lib/frontend-abi"
-import { buildEvmRuntimeCompatibilityScript, buildHTMLShell, rewritePreviewDependencies } from "@/lib/frontend-shell"
-import { fetchIpfsContent } from "@/lib/ipfs-gateway"
+import { buildEvmRuntimeCompatibilityScript } from "@/lib/frontend-shell"
 import { compileSolidity } from "@/lib/solidity"
 import { supabaseRequest } from "@/lib/supabase"
+import { hydrateDappSources } from "@/lib/source-storage"
 import { buildSolanaRuntimeCompatibilityScript, inferLegacySolanaIdl, replaceSolanaProgramId, wrapSolanaBabelSource } from "@/lib/solana-frontend"
 
 export const dynamic = "force-dynamic"
-export const maxDuration = 30
 
 const CID_PATTERN = /^(?:Qm[1-9A-HJ-NP-Za-km-z]{44}|b[a-z2-7]{20,})$/
 const runtimeCache = new Map<string, { abi?: Abi; chainId?: number }>()
@@ -16,11 +15,11 @@ const runtimeCache = new Map<string, { abi?: Abi; chainId?: number }>()
 async function compiledRuntimeForCid(cid: string) {
   const cached = runtimeCache.get(cid)
   if (cached) return cached
-  const rows = await supabaseRequest<Array<{ name: string; contract_code: string | null; chain: string; contract_chain_id: number | null }>>({
+  const rows = await supabaseRequest<Array<{ name: string; contract_code: string | null; source_bundle_path: string | null; source_bundle_hash: string | null; chain: string; contract_chain_id: number | null }>>({
     path: "dapps",
-    query: { ipfs_hash: `eq.${cid}`, select: "name,contract_code,chain,contract_chain_id", limit: "1" },
+    query: { ipfs_hash: `eq.${cid}`, select: "name,contract_code,source_bundle_path,source_bundle_hash,chain,contract_chain_id", limit: "1" },
   })
-  const dapp = rows[0]
+  const dapp = rows[0] ? await hydrateDappSources(rows[0]) : undefined
   if (!dapp || dapp.chain !== "evm") return {}
   const chainId = dapp.contract_chain_id || undefined
   const abi = dapp.contract_code ? compileSolidity(dapp.contract_code, dapp.name, { chainId }).abi : undefined
@@ -36,48 +35,12 @@ export async function GET(_request: Request, { params }: { params: Promise<{ cid
   if (!CID_PATTERN.test(cid)) return NextResponse.json({ error: "Invalid IPFS CID" }, { status: 400 })
 
   try {
-    let upstream: Response
-    try {
-      upstream = await fetchIpfsContent(cid)
-    } catch (gatewayError) {
-      const rows = await supabaseRequest<Array<{
-        name: string
-        frontend_code: string | null
-        contract_code: string | null
-        contract_address: string | null
-        contract_chain_id: number | null
-        chain: string
-      }>>({
-        path: "dapps",
-        query: {
-          ipfs_hash: `eq.${cid}`,
-          select: "name,frontend_code,contract_code,contract_address,contract_chain_id,chain",
-          limit: "1",
-        },
-      })
-      const stored = rows[0]
-      if (!stored?.frontend_code) throw gatewayError
-
-      let storedAbi: Abi | undefined
-      if (stored.chain === "evm" && stored.contract_code) {
-        try {
-          storedAbi = compileSolidity(stored.contract_code, stored.name, {
-            chainId: stored.contract_chain_id || undefined,
-          }).abi
-        } catch {
-          // The generated frontend remains usable when legacy ABI recovery fails.
-        }
-      }
-      const html = buildHTMLShell(
-        stored.frontend_code,
-        stored.contract_address || "",
-        stored.chain,
-        false,
-        storedAbi,
-        stored.contract_chain_id || undefined,
-      )
-      console.warn("[ipfs] serving stored artifact fallback", { cid })
-      upstream = new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } })
+    const upstream = await fetch(`https://dweb.link/ipfs/${encodeURIComponent(cid)}`, {
+      cache: "no-store",
+      redirect: "follow",
+    })
+    if (!upstream.ok) {
+      return NextResponse.json({ error: `IPFS content unavailable (${upstream.status})` }, { status: 502 })
     }
 
     const contentType = upstream.headers.get("content-type") || "application/octet-stream"
@@ -87,7 +50,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ cid
     headers.set("X-Content-Type-Options", "nosniff")
     if (contentType.includes("text/html")) {
       headers.set("Cache-Control", "no-store")
-      let html = rewritePreviewDependencies(await upstream.text())
+      let html = await upstream.text()
       let contractAbi: Abi | undefined
       let evmChainId: number | undefined
       let solanaCompatibility = buildSolanaRuntimeCompatibilityScript()
@@ -116,15 +79,12 @@ export async function GET(_request: Request, { params }: { params: Promise<{ cid
       } catch {
         // Keep the immutable IPFS artifact available even if legacy ABI recovery fails.
       }
-      const solanaAsset = embeddedRuntime?.chain === "solana" && !html.includes("/runtime/solana-runtime.js")
-        ? '<script src="/runtime/solana-runtime.js"></script>'
-        : ""
-      const compatibility = `${solanaAsset}<script>${buildEvmRuntimeCompatibilityScript(contractAbi, evmChainId)}${solanaCompatibility}if(window.solanaWeb3)Object.assign(window,window.solanaWeb3);</script>`
+      const compatibility = `<script>${buildEvmRuntimeCompatibilityScript(contractAbi, evmChainId)}${solanaCompatibility}if(window.solanaWeb3)Object.assign(window,window.solanaWeb3);</script>`
       html = html.replace('<script type="text/babel"', `${compatibility}<script type="text/babel"`)
       return new Response(html, { status: 200, headers })
     }
     return new Response(upstream.body, { status: 200, headers })
   } catch {
-    return NextResponse.json({ error: "IPFS gateways are temporarily unavailable. Please retry." }, { status: 503 })
+    return NextResponse.json({ error: "IPFS gateway is temporarily unavailable" }, { status: 502 })
   }
 }

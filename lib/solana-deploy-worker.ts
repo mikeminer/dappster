@@ -4,16 +4,19 @@ import { localGetDapp, localUpdateDapp } from "./local-store"
 import { completeSolanaDeployJob, releaseSolanaDeployJob, replaceSolanaDeployJobProgramId, type SolanaDeployJob } from "./solana-deploy-jobs"
 import { verifySolanaProgramDeployment } from "./solana-deployment"
 import { compileSolanaProgram, createSolanaProgramKeypair, deployCompiledSolanaProgram, selectSolanaProgramForDeployment } from "./solana-program-deploy"
+import { hydrateDappSources } from "./source-storage"
 import { supabaseRequest } from "./supabase"
+import { injectCompiledSolanaIdl } from "./solana-frontend"
 
 export async function processClaimedSolanaDeployJob(job: SolanaDeployJob, workerToken: string, isDemo: boolean) {
   try {
     const localDapp = isDemo ? localGetDapp(job.dapp_id) : undefined
-    const rows = isDemo ? [] : await supabaseRequest<{ contract_code: string; contract_address: string | null }[]>({
+    const rows = isDemo ? [] : await supabaseRequest<{ contract_code: string | null; frontend_code: string | null; contract_address: string | null; source_bundle_path: string | null; source_bundle_hash: string | null }[]>({
       path: "dapps",
-      query: { id: `eq.${job.dapp_id}`, owner_id: `eq.${job.owner_id}`, select: "contract_code,contract_address", limit: "1" },
+      query: { id: `eq.${job.dapp_id}`, owner_id: `eq.${job.owner_id}`, select: "contract_code,frontend_code,contract_address,source_bundle_path,source_bundle_hash", limit: "1" },
     })
-    const dapp = localDapp || rows[0]
+    const storedDapp = rows[0] ? await hydrateDappSources(rows[0]) : undefined
+    const dapp = localDapp || storedDapp
     if (!dapp?.contract_code) throw new Error("Codice del programma Solana non trovato per il job")
     const sourceHash = createHash("sha256").update(dapp.contract_code).digest("hex")
     if (sourceHash !== job.source_hash) throw new Error("Il sorgente è cambiato dopo il finanziamento del deploy")
@@ -56,8 +59,11 @@ export async function processClaimedSolanaDeployJob(job: SolanaDeployJob, worker
     await verifySolanaProgramDeployment({ programId: deployed.programId, cluster: job.cluster })
     await completeSolanaDeployJob(job.id, workerToken, deployed.programId, isDemo)
     const deployedAt = new Date().toISOString()
-    if (localDapp) localUpdateDapp(job.dapp_id, { contract_address: deployed.programId, contract_deployed_at: deployedAt, deploy_status: "draft" })
-    else await supabaseRequest({ path: "dapps", method: "PATCH", query: { id: `eq.${job.dapp_id}`, owner_id: `eq.${job.owner_id}` }, body: { contract_address: deployed.programId, contract_deployed_at: deployedAt, deploy_status: "draft", updated_at: deployedAt } })
+    const frontendCode = dapp.frontend_code
+      ? injectCompiledSolanaIdl(dapp.frontend_code, built.idl, deployed.programId)
+      : undefined
+    if (localDapp) localUpdateDapp(job.dapp_id, { contract_address: deployed.programId, contract_deployed_at: deployedAt, deploy_status: "draft", ...(frontendCode ? { frontend_code: frontendCode } : {}) })
+    else await supabaseRequest({ path: "dapps", method: "PATCH", query: { id: `eq.${job.dapp_id}`, owner_id: `eq.${job.owner_id}` }, body: { contract_address: deployed.programId, contract_deployed_at: deployedAt, deploy_status: "draft", ...(frontendCode ? { frontend_code: frontendCode } : {}), updated_at: deployedAt } })
     return { programId: deployed.programId, payer: deployed.payer, byteLength: built.byteLength }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Deploy Solana non riuscito"

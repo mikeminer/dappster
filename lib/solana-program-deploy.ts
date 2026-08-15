@@ -24,6 +24,8 @@ const MAX_PROGRAM_BYTES = 2_000_000
 const SANDBOX_TIMEOUT_MS = 45 * 60 * 1000
 const TOOLCHAIN_BIN = "/vercel/sandbox/.local/share/solana/install/active_release/bin"
 const CARGO_BIN = "/vercel/sandbox/.cargo/bin"
+const IDL_BUILDER_ROOT = "/vercel/sandbox/.cache/dappster-anchor-idl-builder-v0.31.1"
+const IDL_BUILDER_MANIFEST = `${IDL_BUILDER_ROOT}/Cargo.toml`
 export const SOLANA_DEPLOY_MEMO_PROGRAM = new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr")
 const LAMPORTS_PER_SIGNATURE = 5_000
 const MIN_DEPLOY_FEE_BUFFER = 2_000_000
@@ -56,6 +58,13 @@ function sandboxApiError(error: unknown) {
   if (!detail && typeof providerError.text === "string") detail = providerError.text
   const normalized = detail.replace(/\s+/g, " ").trim().slice(0, 2_000)
   return new Error(`Solana build sandbox unavailable: ${normalized || error.message}`)
+}
+
+function sandboxCredentials() {
+  const token = process.env.VERCEL_TOKEN
+  const teamId = process.env.VERCEL_TEAM_ID
+  const projectId = process.env.VERCEL_PROJECT_ID
+  return token && teamId && projectId ? { token, teamId, projectId } : {}
 }
 
 async function runSandboxCommand(sandbox: Sandbox, ...args: Parameters<Sandbox["runCommand"]>) {
@@ -101,11 +110,71 @@ async function ensureSolanaToolchain(sandbox: Sandbox) {
   if (rust.exitCode !== 0) throw commandError("Installazione toolchain Rust", await rust.stdout(), await rust.stderr())
 }
 
+async function ensureAnchorIdlBuilder(sandbox: Sandbox) {
+  const prepare = await runSandboxCommand(sandbox, {
+    cmd: "mkdir",
+    args: ["-p", `${IDL_BUILDER_ROOT}/src`],
+  })
+  if (prepare.exitCode !== 0) {
+    throw commandError("Preparazione generatore IDL Anchor", await prepare.stdout(), await prepare.stderr())
+  }
+  await sandbox.writeFiles([
+    {
+      path: IDL_BUILDER_MANIFEST,
+      content: `[package]
+name = "dappster-anchor-idl-builder"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anchor-lang-idl = { version = "=0.1.2", features = ["build"] }
+anyhow = "=1.0.98"
+serde_json = "=1.0.140"
+`,
+    },
+    {
+      path: `${IDL_BUILDER_ROOT}/src/main.rs`,
+      content: `use anchor_lang_idl::build::IdlBuilder;
+use std::{env, path::PathBuf};
+
+fn main() -> anyhow::Result<()> {
+    let program_path = env::args().nth(1).ok_or_else(|| anyhow::anyhow!("program path is required"))?;
+    // Anchor 0.30.1 requires this pinned nightly for proc-macro IDL generation.
+    env::set_var("RUSTUP_TOOLCHAIN", "nightly-2024-05-09");
+    let idl = IdlBuilder::new()
+        .program_path(PathBuf::from(program_path))
+        .resolution(true)
+        .skip_lint(true)
+        .cargo_args(vec!["--locked".to_string()])
+        .build()?;
+    println!("{}", serde_json::to_string_pretty(&idl)?);
+    Ok(())
+}
+`,
+    },
+  ])
+}
+
 function sourceForProgram(source: string, programId: string) {
-  const normalizedSource = source.replace(
+  let normalizedSource = source.replace(
     /^(\s*)(require(?:_eq|_neq|_keys_eq|_keys_neq|_gt|_gte)?)(\s*)\(/gm,
     "$1$2!$3(",
   )
+  // Anchor's Accounts derive expects the associated-token program type to be
+  // a local identifier. AI-generated sources sometimes qualify the type all
+  // the way through anchor_spl, which compiles for SBF but fails during the
+  // separate IDL build performed with the idl-build feature.
+  if (/anchor_spl::associated_token::AssociatedToken/.test(normalizedSource)) {
+    normalizedSource = normalizedSource
+      .split("\n")
+      .map(line => /^\s*use\b/.test(line)
+        ? line
+        : line.replaceAll("anchor_spl::associated_token::AssociatedToken", "AssociatedToken"))
+      .join("\n")
+    if (!/^\s*use\s+anchor_spl::associated_token::AssociatedToken\s*;/m.test(normalizedSource)) {
+      normalizedSource = `use anchor_spl::associated_token::AssociatedToken;\n${normalizedSource}`
+    }
+  }
   const declaration = `declare_id!("${programId}");`
   if (/declare_id!\s*\(\s*"[1-9A-HJ-NP-Za-km-z]+"\s*\)\s*;/.test(normalizedSource)) {
     return normalizedSource.replace(/declare_id!\s*\(\s*"[1-9A-HJ-NP-Za-km-z]+"\s*\)\s*;/, declaration)
@@ -140,6 +209,28 @@ blake3 = "=1.8.2"
 constant_time_eq = "=0.3.1"
 base64ct = "=1.6.0"
 indexmap = "=2.11.4"
+syn = "=2.0.87"
+proc-macro2 = "=1.0.86"
+`
+}
+
+function anchorManifest(programId: string) {
+  return `[toolchain]
+anchor_version = "0.31.1"
+
+[features]
+resolution = true
+skip-lint = true
+
+[programs.localnet]
+${PROGRAM_CRATE_NAME} = "${programId}"
+
+[provider]
+cluster = "Localnet"
+wallet = "/vercel/sandbox/.config/solana/id.json"
+
+[workspace]
+members = ["."]
 `
 }
 
@@ -169,6 +260,7 @@ async function compileSolanaProgramInSandbox(source: string, programId: string) 
   let sandbox: Sandbox
   try {
     sandbox = await Sandbox.getOrCreate({
+      ...sandboxCredentials(),
       name: BUILDER_NAME,
       runtime: "node24",
       persistent: true,
@@ -182,6 +274,7 @@ async function compileSolanaProgramInSandbox(source: string, programId: string) 
   // Keep setup outside onCreate so a partially-created persistent sandbox can
   // repair itself on the next request instead of being permanently unusable.
   await ensureSolanaToolchain(sandbox)
+  await ensureAnchorIdlBuilder(sandbox)
 
   const prepareWorkspace = await runSandboxCommand(sandbox, {
     cmd: "mkdir",
@@ -192,6 +285,7 @@ async function compileSolanaProgramInSandbox(source: string, programId: string) 
   }
   await sandbox.writeFiles([
     { path: `${workspace}/Cargo.toml`, content: cargoManifest() },
+    { path: `${workspace}/Anchor.toml`, content: anchorManifest(programId) },
     { path: `${workspace}/src/lib.rs`, content: sourceForProgram(source, programId) },
   ])
 
@@ -234,7 +328,29 @@ async function compileSolanaProgramInSandbox(source: string, programId: string) 
   const artifact = await sandbox.readFileToBuffer({ path: `${workspace}/target/deploy/${PROGRAM_CRATE_NAME}.so` })
   if (!artifact?.length) throw new Error("La compilazione non ha prodotto un programma .so")
   if (artifact.length > MAX_PROGRAM_BYTES) throw new Error("Il programma compilato supera il limite di 2 MB")
-  return { artifact: new Uint8Array(artifact), byteLength: artifact.length }
+  const idlBuild = await runSandboxCommand(sandbox, {
+    cmd: `${CARGO_BIN}/cargo`,
+    args: ["run", "--quiet", "--release", "--manifest-path", IDL_BUILDER_MANIFEST, "--", workspace],
+    cwd: workspace,
+    env: {
+      HOME: "/vercel/sandbox",
+      PATH: `${CARGO_BIN}:${TOOLCHAIN_BIN}:/usr/local/bin:/usr/bin:/bin`,
+      CARGO_TERM_COLOR: "never",
+      CARGO_HTTP_CAINFO: "/etc/pki/tls/certs/ca-bundle.crt",
+      SSL_CERT_FILE: "/etc/pki/tls/certs/ca-bundle.crt",
+    },
+  })
+  const idlStdout = await idlBuild.stdout()
+  const idlStderr = await idlBuild.stderr()
+  if (idlBuild.exitCode !== 0) throw commandError("Generazione IDL Anchor", idlStdout, idlStderr)
+  let idl: Record<string, unknown>
+  try {
+    idl = JSON.parse(idlStdout) as Record<string, unknown>
+  } catch {
+    throw new Error("Anchor non ha prodotto un IDL JSON valido")
+  }
+  idl.address = programId
+  return { artifact: new Uint8Array(artifact), byteLength: artifact.length, idl }
 }
 
 export async function compileSolanaProgram(source: string, programId: string) {
@@ -318,21 +434,12 @@ export async function verifySolanaDeployFunding(input: {
   const wallet = new PublicKey(input.wallet)
   const connection = new Connection(rpcUrl(input.cluster), { commitment: "confirmed", confirmTransactionInitialTimeout: 120_000 })
   const deadline = Date.now() + 90_000
-  let transaction = await retryRpcRateLimit(
-    () => connection.getParsedTransaction(input.signature, { commitment: "confirmed", maxSupportedTransactionVersion: 0 }),
-    "SOL funding transaction lookup",
-  )
+  let transaction = await connection.getParsedTransaction(input.signature, { commitment: "confirmed", maxSupportedTransactionVersion: 0 })
   while (!transaction && Date.now() < deadline) {
-    const status = (await retryRpcRateLimit(
-      () => connection.getSignatureStatuses([input.signature], { searchTransactionHistory: true }),
-      "SOL funding signature status",
-    )).value[0]
+    const status = (await connection.getSignatureStatuses([input.signature], { searchTransactionHistory: true })).value[0]
     if (status?.err) throw new Error("The SOL funding transaction failed and was not charged. Try deployment again.")
     await new Promise(resolve => setTimeout(resolve, 2_000))
-    transaction = await retryRpcRateLimit(
-      () => connection.getParsedTransaction(input.signature, { commitment: "confirmed", maxSupportedTransactionVersion: 0 }),
-      "SOL funding transaction lookup",
-    )
+    transaction = await connection.getParsedTransaction(input.signature, { commitment: "confirmed", maxSupportedTransactionVersion: 0 })
   }
   if (!transaction) throw new Error("The SOL funding transaction is not confirmed yet. Retry deployment without sending SOL again.")
   if (transaction.meta?.err) throw new Error("The SOL funding transaction failed and was not charged. Try deployment again.")
@@ -436,20 +543,31 @@ async function sendLoaderTransaction(
   transaction: Transaction,
   signers: Keypair[],
   label: string,
+  options: { rateLimitRetries?: number } = {},
 ) {
-  try {
-    return await sendAndConfirmTransaction(connection, transaction, signers, {
-      commitment: "confirmed",
-      preflightCommitment: "confirmed",
-      maxRetries: 20,
-    })
-  } catch (error) {
-    let logs: string[] | undefined
-    if (error instanceof SendTransactionError) {
-      try { logs = await error.getLogs(connection) ?? undefined } catch { logs = error.logs ?? undefined }
+  const rateLimitRetries = options.rateLimitRetries ?? 0
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await sendAndConfirmTransaction(connection, transaction, signers, {
+        commitment: "confirmed",
+        preflightCommitment: "confirmed",
+        maxRetries: 20,
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      const rateLimited = /(?:\b429\b|too many requests|rate[ -]?limit)/i.test(message)
+      if (rateLimited && attempt < rateLimitRetries) {
+        const delayMs = Math.min(15_000, 750 * (2 ** attempt)) + Math.floor(Math.random() * 250)
+        await new Promise(resolve => setTimeout(resolve, delayMs))
+        continue
+      }
+
+      let logs: string[] | undefined
+      if (error instanceof SendTransactionError) {
+        try { logs = await error.getLogs(connection) ?? undefined } catch { logs = error.logs ?? undefined }
+      }
+      throw new Error(`${label} failed: ${message}${logs?.length ? `\n${logs.join("\n")}` : ""}`)
     }
-    const message = error instanceof Error ? error.message : "Unknown Solana transaction error"
-    throw new Error(`${label} failed: ${message}${logs?.length ? `\n${logs.join("\n")}` : ""}`)
   }
 }
 
@@ -659,8 +777,9 @@ export async function deployCompiledSolanaProgram(
         const bytes = artifact.slice(offset, Math.min(offset + UPGRADEABLE_WRITE_CHUNK_BYTES, artifact.length))
         writes.push({ offset, bytes })
       }
-      // Share one blockhash and one status poll per batch instead of spawning
-      // a confirmation poller for every program chunk at once.
+      // The batch shares one blockhash and confirms every signature in a
+      // single status request. This avoids one confirmation poller per chunk,
+      // which caused both RPC 429s and Vercel's five-minute timeout.
       await sendProgramWriteBatch(connection, payer, buffer.publicKey, writes, publicRpc)
     }
 
