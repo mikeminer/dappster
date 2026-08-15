@@ -26,14 +26,14 @@ export async function GET(request: Request) {
   } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Directory unavailable" }, { status: 500 }) }
 }
 
-const createSchema = z.object({ name: z.string().min(2).max(80), description: z.string().max(600).optional(), chain: z.enum(CHAIN_IDS), tags: z.array(z.string().max(30)).max(6).optional() })
+const createSchema = z.object({ name: z.string().min(2).max(80), description: z.string().max(600).optional(), chain: z.enum(CHAIN_IDS), contract_network: z.enum(["devnet", "mainnet-beta"]).optional(), tags: z.array(z.string().max(30)).max(6).optional() })
 
 export async function POST(request: Request) {
   try {
     const user = await getRequestUser(request)
     const input = createSchema.parse(await request.json())
     if (user.isDemo) {
-      const dapp = localCreateDapp({ owner_id: user.id, name: input.name, description: input.description || "", chain: input.chain, tags: input.tags || [], contract_code: "", frontend_code: "", deploy_status: "draft", is_listed: false, is_featured: false, audit_status: "none" })
+      const dapp = localCreateDapp({ owner_id: user.id, name: input.name, description: input.description || "", chain: input.chain, contract_network: input.contract_network, tags: input.tags || [], contract_code: "", frontend_code: "", deploy_status: "draft", is_listed: false, is_featured: false, audit_status: "none" })
       return NextResponse.json([dapp], { status: 201 })
     }
     const rows = await supabaseRequest({ path: "dapps", method: "POST", body: { ...input, owner_id: user.id } })

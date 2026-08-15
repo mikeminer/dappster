@@ -26,6 +26,14 @@ const nextConfig = {
 
     return [
       { source: "/:path*", headers: commonSecurityHeaders },
+      {
+        source: "/runtime/:path*",
+        headers: [
+          { key: "Access-Control-Allow-Origin", value: "*" },
+          { key: "Cross-Origin-Resource-Policy", value: "cross-origin" },
+          { key: "Cache-Control", value: "public, max-age=3600, must-revalidate" },
+        ],
+      },
     ]
   },
   outputFileTracingIncludes: {

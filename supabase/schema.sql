@@ -190,6 +190,7 @@ create table if not exists public.solana_deploy_locks (
 create unique index if not exists credit_transactions_payment_id_key on public.credit_transactions(payment_id) where payment_id is not null;
 create index if not exists dapps_directory_idx on public.dapps(is_listed, is_featured desc, created_at desc);
 create index if not exists dapps_owner_idx on public.dapps(owner_id, updated_at desc);
+create index if not exists dapps_dappster_points_idx on public.dapps(owner_id, created_at desc) where is_listed = true and deploy_status = 'live' and contract_address is not null and (ipfs_hash is not null or ipfs_url is not null);
 create index if not exists marketplace_purchases_buyer_idx on public.marketplace_purchases(buyer_id, created_at desc);
 create index if not exists marketplace_purchases_creator_idx on public.marketplace_purchases(dapp_id, created_at desc);
 create index if not exists solana_deploy_jobs_queue_idx on public.solana_deploy_jobs(cluster, status, created_at);

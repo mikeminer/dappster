@@ -1,17 +1,11 @@
-import { z } from "zod"
 import { createPublicClient, decodeEventLog, fallback, http, isAddress } from "viem"
 import { base } from "viem/chains"
 import { accountHasWallet } from "./accounts"
 import { BASE_MEMBERSHIP_CONTRACT, MEMBERSHIP_ABI } from "./payments"
 import { supabaseRequest } from "./supabase"
+import type { CreditBurnProofInput } from "./credit-burn-schema"
 
-export const creditBurnProofSchema = z.object({
-  txHash: z.string().regex(/^0x[0-9a-fA-F]{64}$/),
-  usageId: z.string().regex(/^0x[0-9a-fA-F]{64}$/),
-  payer: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
-})
-
-export type CreditBurnProofInput = z.infer<typeof creditBurnProofSchema>
+export { creditBurnProofSchema, optionalCreditBurnProofSchema } from "./credit-burn-schema"
 
 type BurnSpendRow = {
   user_id: string
