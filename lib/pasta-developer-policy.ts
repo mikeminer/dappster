@@ -11,5 +11,6 @@ export function qualifiesForSolanaTesterTier(balanceRaw: bigint) {
 export function isSolanaTesterAction(action: string) {
   const normalized = action.trim().toLowerCase()
   return normalized === "solana dapp generation"
+    || normalized === "solana ipfs frontend deployment"
     || normalized.startsWith("solana ") && (normalized.includes("security audit") || normalized.includes("deployed-contract audit"))
 }

@@ -11,5 +11,6 @@ export function qualifiesForEvmTesterTier(balanceRaw: bigint) {
 export function isEvmTesterAction(action: string) {
   const normalized = action.trim().toLowerCase()
   return normalized === "evm dapp generation"
+    || normalized === "evm ipfs frontend deployment"
     || normalized.startsWith("evm ") && (normalized.includes("security audit") || normalized.includes("deployed-contract audit"))
 }
