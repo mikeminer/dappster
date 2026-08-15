@@ -410,6 +410,22 @@ button { color: inherit; }
 .project-actions > a:hover { color: white; border-color: #4a515b; background: #191d22; }
 .project-delete-button:hover { color: #ff7272; border-color: rgba(255,78,78,.5); background: rgba(255,78,78,.08); }
 .credit-history-panel { margin-top: 24px; overflow: hidden; }
+.developer-benefits-panel { margin-top: 16px; overflow: hidden; }
+.developer-benefits-head { align-items: center; }
+.developer-benefits-head .panel-title { display: inline-flex; align-items: center; gap: 8px; }
+.developer-benefits-head p { margin: 6px 0 0; color: #747d88; font-size: 11px; line-height: 1.55; }
+.developer-benefits-count { padding: 5px 9px; border: 1px solid #4f621d; border-radius: 999px; color: var(--acid); background: #151b0d; font: 700 9px/1 "SFMono-Regular", Consolas, monospace; text-transform: uppercase; }
+.developer-benefits-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--line); }
+.developer-benefit-badge { min-width: 0; display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 16px; padding: 22px; background: #0b0d10; }
+.developer-benefit-medal { width: 58px; height: 58px; display: grid; place-items: center; border: 1px solid #343b45; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #252b34, #0e1115 68%); box-shadow: inset 0 0 0 5px #11151a; }
+.developer-benefit-badge.solana .developer-benefit-medal { color: #14f195; border-color: #376959; }
+.developer-benefit-badge.evm .developer-benefit-medal { color: #c7ff32; border-color: #596c23; }
+.developer-benefit-title { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.developer-benefit-title strong { color: #f1f3f5; font-size: 13px; line-height: 1.45; }
+.developer-benefit-title span { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; padding: 5px 7px; border-radius: 999px; color: #8cf5bd; background: #102219; font: 700 8px/1 "SFMono-Regular", Consolas, monospace; text-transform: uppercase; }
+.developer-benefit-copy p { margin: 8px 0 11px; color: #8d96a1; font-size: 11px; line-height: 1.65; }
+.developer-benefit-copy a { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; color: var(--acid); font: 700 9px/1.5 "SFMono-Regular", Consolas, monospace; overflow-wrap: anywhere; }
+.developer-benefits-unavailable { grid-column: 1 / -1; padding: 18px 22px; color: #b0b7c0; background: #0b0d10; font-size: 12px; }
 .credit-history-summary { cursor: pointer; list-style: none; user-select: none; }
 .credit-history-summary::-webkit-details-marker { display: none; }
 .credit-history-summary::after { content: "+"; flex: 0 0 auto; margin-left: 12px; color: var(--acid); font: 600 20px/1 "SFMono-Regular", Consolas, monospace; }
@@ -517,6 +533,7 @@ button { color: inherit; }
   .tester-tier-grid { grid-template-columns: 1fr; }
   .tester-tier-card { align-items: flex-start; flex-direction: column; padding: 24px 22px; }
   .tester-tier-card .btn { width: 100%; }
+  .developer-benefits-list { grid-template-columns: 1fr; }
   .credit-burn-head { grid-template-columns: 1fr; gap: 14px; padding: 25px 22px; }
   .credit-burn-rules { grid-template-columns: 1fr; }
   .credit-burn-rules > div { border-right: 0; border-bottom: 1px solid var(--line); }
@@ -670,6 +687,9 @@ button { color: inherit; }
   .credit-history-panel + div .panel-body { flex-wrap: wrap; }
   .credit-history-panel + div .panel-body > :last-child { width: 100%; margin-left: 0 !important; }
   .credit-history-panel + div .panel-body > :last-child .btn { width: 100%; }
+  .developer-benefit-badge { grid-template-columns: 46px minmax(0, 1fr); gap: 12px; padding: 18px 16px; }
+  .developer-benefit-medal { width: 46px; height: 46px; }
+  .developer-benefit-title { align-items: flex-start; flex-direction: column; }
   .credit-burn-table { min-width: 0; }
   .credit-burn-table thead { display: none; }
   .credit-burn-table, .credit-burn-table tbody, .credit-burn-table tr, .credit-burn-table td { display: block; width: 100%; }

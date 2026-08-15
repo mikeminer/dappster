@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
-import { AlertTriangle, ArrowUpRight, Check, Clock3, Coins, Eye, EyeOff, Loader2, Plus, Rocket, Save, Sparkles, Trash2, UserRound, X } from "lucide-react"
+import { AlertTriangle, ArrowUpRight, Check, Clock3, Coins, Eye, EyeOff, Loader2, Medal, Plus, Rocket, Save, Sparkles, Trash2, UserRound, X } from "lucide-react"
 import { apiFetch } from "@/lib/client-api"
 import { ChainNetworkBadge } from "@/components/ChainNetworkBadge"
 import { UsdcCheckoutButton } from "@/components/UsdcCheckoutButton"
@@ -66,10 +66,9 @@ export function DashboardClient() {
   const auditedCount = useMemo(() => workspace?.dapps.filter(project => project.audit_status === "completed").length || 0, [workspace])
   const solanaTester = workspace?.testerTiers?.solana
   const evmTester = workspace?.testerTiers?.evm
-  const testerTierNames = [solanaTester?.eligible ? "Solana Tester" : null, evmTester?.eligible ? "EVM Tester" : null].filter(Boolean).join(" + ")
-  const hasTesterTier = Boolean(testerTierNames)
+  const hasTesterTier = Boolean(solanaTester?.eligible || evmTester?.eligible)
   const testerStatusUnavailable = solanaTester?.status === "unavailable" || evmTester?.status === "unavailable"
-  const hasActivePlan = hasTesterTier || Boolean(workspace?.profile.plan !== "free" && workspace?.profile.plan_expires_at && new Date(workspace.profile.plan_expires_at).getTime() > Date.now())
+  const hasActivePlan = Boolean(workspace?.profile.plan !== "free" && workspace?.profile.plan_expires_at && new Date(workspace.profile.plan_expires_at).getTime() > Date.now())
 
   async function toggleListing(project: Project) {
     try {
@@ -174,8 +173,25 @@ export function DashboardClient() {
     </details>
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:16,marginTop:24}}>
       <div className="panel"><div className="panel-body" style={{display:"flex",gap:16,alignItems:"center"}}><div className="feature-icon" style={{margin:0}}><Coins size={19} /></div><div><strong style={{fontSize:13}}>Need more room?</strong><p style={{margin:"5px 0 0",color:"#757d87",fontSize:11}}>300 credits · 25 USDC on Base.</p></div><div style={{marginLeft:"auto"}}><UsdcCheckoutButton packageId="builder" className="btn btn-outline" label="Top up" /></div></div></div>
-      <div className="panel"><div className="panel-body" style={{display:"flex",gap:16,alignItems:"center",flexWrap:"wrap"}}><div className="feature-icon" style={{margin:0}}><Sparkles size={19} /></div><div><strong style={{fontSize:13}}>{hasActivePlan ? "Current plan" : "Choose your plan"}</strong><p style={{margin:"5px 0 0",color:"#757d87",fontSize:11}}>{hasTesterTier ? `${testerTierNames} · token balance verified · unlimited matching-ecosystem generations and audits` : hasActivePlan ? `${workspace?.profile.plan} · until ${new Date(workspace!.profile.plan_expires_at!).toLocaleDateString()}` : testerStatusUnavailable ? "Token-holder status is temporarily unavailable. Your credits remain usable." : "No plan is active until you select and purchase one."}</p></div>{hasTesterTier ? <div style={{marginLeft:"auto",display:"flex",gap:8,flexWrap:"wrap"}}>{solanaTester?.eligible && <a href={`https://pump.fun/coin/${solanaTester.mint}`} target="_blank" rel="noreferrer" className="btn btn-outline">{solanaTester.balanceUiAmount.toLocaleString()} PASTA</a>}{evmTester?.eligible && <a href={`https://basescan.org/token/${evmTester.tokenAddress}`} target="_blank" rel="noreferrer" className="btn btn-outline">{evmTester.balanceUiAmount.toLocaleString()} pappardelle</a>}</div> : <Link href="/#pricing" className="btn btn-outline" style={{marginLeft:"auto"}}>{hasActivePlan ? "Plans" : "Choose"}</Link>}</div></div>
+      <div className="panel"><div className="panel-body" style={{display:"flex",gap:16,alignItems:"center",flexWrap:"wrap"}}><div className="feature-icon" style={{margin:0}}><Sparkles size={19} /></div><div><strong style={{fontSize:13}}>{hasActivePlan ? "Current subscription" : "Choose a subscription"}</strong><p style={{margin:"5px 0 0",color:"#757d87",fontSize:11}}>{hasActivePlan ? `${workspace?.profile.plan} · until ${new Date(workspace!.profile.plan_expires_at!).toLocaleDateString()}` : "Subscriptions and token-holder benefits are separate."}</p></div><Link href="/#pricing" className="btn btn-outline" style={{marginLeft:"auto"}}>{hasActivePlan ? "Subscriptions" : "Choose"}</Link></div></div>
     </div>
+    {(hasTesterTier || testerStatusUnavailable) && <section className="panel developer-benefits-panel" aria-labelledby="developer-benefits-title">
+      <div className="panel-head developer-benefits-head">
+        <div><div className="panel-title" id="developer-benefits-title"><Medal size={16} aria-hidden="true" /> Developer token holder benefits</div><p>Onchain holdings unlock ecosystem-specific Dappster access independently from subscriptions.</p></div>
+        {hasTesterTier && <span className="developer-benefits-count">{Number(Boolean(solanaTester?.eligible)) + Number(Boolean(evmTester?.eligible))} verified</span>}
+      </div>
+      <div className="developer-benefits-list">
+        {solanaTester?.eligible && <article className="developer-benefit-badge solana">
+          <div className="developer-benefit-medal"><Medal size={25} aria-hidden="true" /></div>
+          <div className="developer-benefit-copy"><div className="developer-benefit-title"><strong>Solana Developer token holder benefit</strong><span><Check size={12} aria-hidden="true" /> Verified</span></div><p>Hold at least {solanaTester.minimumUiAmount.toLocaleString()} PASTA to unlock unlimited generations on Solana Mainnet and Devnet, plus unlimited security audits.</p><a href={`https://pump.fun/coin/${solanaTester.mint}`} target="_blank" rel="noreferrer">Balance: {solanaTester.balanceUiAmount.toLocaleString()} PASTA <ArrowUpRight size={13} aria-hidden="true" /></a></div>
+        </article>}
+        {evmTester?.eligible && <article className="developer-benefit-badge evm">
+          <div className="developer-benefit-medal"><Medal size={25} aria-hidden="true" /></div>
+          <div className="developer-benefit-copy"><div className="developer-benefit-title"><strong>EVM Developer token holder benefit</strong><span><Check size={12} aria-hidden="true" /> Verified</span></div><p>Hold at least {evmTester.minimumUiAmount.toLocaleString()} pappardelle on Base to unlock unlimited generations across supported EVM networks, plus unlimited security audits.</p><a href={`https://basescan.org/token/${evmTester.tokenAddress}`} target="_blank" rel="noreferrer">Balance: {evmTester.balanceUiAmount.toLocaleString()} pappardelle <ArrowUpRight size={13} aria-hidden="true" /></a></div>
+        </article>}
+        {!hasTesterTier && testerStatusUnavailable && <div className="developer-benefits-unavailable">Token-holder verification is temporarily unavailable. Your credits and subscriptions remain usable.</div>}
+      </div>
+    </section>}
     {projectToDelete && <div className="modal-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) closeDeleteConfirmation() }}><div className="modal delete-project-modal" role="dialog" aria-modal="true" aria-labelledby="delete-project-title"><button type="button" className="credits-modal-close" aria-label="Close deletion confirmation" onClick={closeDeleteConfirmation} disabled={deleting}><X size={18} /></button><div className="delete-project-icon"><AlertTriangle size={23} /></div><h2 id="delete-project-title">Delete “{projectToDelete.name}”?</h2><p>This permanently removes the creation from your Dappster account and Marketplace. Deployed smart contracts and files already published to IPFS cannot be removed from the blockchain or IPFS network.</p><form onSubmit={deleteProject}><label className="form-label" htmlFor="delete-project-confirmation">Type this statement to confirm:</label><code>{DELETE_CONFIRMATION}</code><input id="delete-project-confirmation" className="input" value={deleteConfirmation} onChange={event => setDeleteConfirmation(event.target.value)} autoComplete="off" autoFocus spellCheck={false} placeholder={DELETE_CONFIRMATION} disabled={deleting} /><div className="delete-project-actions"><button type="button" className="btn btn-outline" onClick={closeDeleteConfirmation} disabled={deleting}>Cancel</button><button type="submit" className="btn btn-danger" disabled={deleting || deleteConfirmation !== DELETE_CONFIRMATION}>{deleting ? <Loader2 className="animate-spin" size={15} /> : <Trash2 size={15} />}{deleting ? "Deleting..." : "Delete permanently"}</button></div></form></div></div>}
   </>
 }
