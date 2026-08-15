@@ -2,6 +2,7 @@ const IPFS_GATEWAYS = [
   { name: "Pinata", url: (cid: string) => `https://gateway.pinata.cloud/ipfs/${encodeURIComponent(cid)}` },
   { name: "IPFS.io", url: (cid: string) => `https://ipfs.io/ipfs/${encodeURIComponent(cid)}` },
   { name: "Dweb", url: (cid: string) => `https://dweb.link/ipfs/${encodeURIComponent(cid)}` },
+  { name: "NFT.Storage", url: (cid: string) => `https://nftstorage.link/ipfs/${encodeURIComponent(cid)}` },
 ] as const
 
 const IPFS_GATEWAY_TIMEOUT_MS = 12_000
