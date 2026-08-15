@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { z } from "zod"
 import { callAI } from "@/lib/ai"
 import { CREDIT_COSTS, getCredits, hasActivePro } from "@/lib/credits"
-import { creditBurnProofSchema, verifyAndSpendCreditBurn } from "@/lib/credit-burn"
+import { optionalCreditBurnProofSchema, verifyAndSpendCreditBurn } from "@/lib/credit-burn"
 import { enforceRateLimit } from "@/lib/rate-limit"
 import { getRequestUser } from "@/lib/runtime"
 import { localCreateDapp, localCredits, localGetDapp, localSpend, localUpdateDapp } from "@/lib/local-store"
@@ -15,7 +15,7 @@ import { getSolanaTesterEntitlement } from "@/lib/pasta-developer-tier"
 import { getEvmTesterEntitlement } from "@/lib/pappardelle-tester-tier"
 export const maxDuration = 300
 
-const requestSchema = z.object({ prompt: z.string().trim().min(1).max(600), chain: z.enum(CHAIN_IDS), evmChainId: z.number().int().positive().optional(), includeAudit: z.boolean().optional().default(false), creditBurn: creditBurnProofSchema.optional(), dappId: z.string().uuid().optional() })
+const requestSchema = z.object({ prompt: z.string().trim().min(1).max(600), chain: z.enum(CHAIN_IDS), evmChainId: z.number().int().positive().optional(), includeAudit: z.boolean().optional().default(false), creditBurn: optionalCreditBurnProofSchema, dappId: z.string().uuid().optional() })
 
 export async function POST(request: Request) {
   try {

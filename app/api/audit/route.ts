@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { z } from "zod"
 import { callAI } from "@/lib/ai"
 import { CREDIT_COSTS, getCredits, hasActivePro } from "@/lib/credits"
-import { creditBurnProofSchema, verifyAndSpendCreditBurn } from "@/lib/credit-burn"
+import { optionalCreditBurnProofSchema, verifyAndSpendCreditBurn } from "@/lib/credit-burn"
 import { getRequestUser } from "@/lib/runtime"
 import { localCredits, localSaveAudit, localSpend, localUpdateDapp } from "@/lib/local-store"
 import { supabaseRequest } from "@/lib/supabase"
@@ -10,7 +10,7 @@ import { CHAIN_IDS } from "@/lib/chain-adapters"
 import { getSolanaTesterEntitlement } from "@/lib/pasta-developer-tier"
 import { getEvmTesterEntitlement } from "@/lib/pappardelle-tester-tier"
 
-const requestSchema = z.object({ dappId: z.string().uuid().optional(), contractCode: z.string().min(30).max(120000), chain: z.enum(CHAIN_IDS), tier: z.enum(["basic", "premium"]).default("premium"), creditBurn: creditBurnProofSchema.optional() })
+const requestSchema = z.object({ dappId: z.string().uuid().optional(), contractCode: z.string().min(30).max(120000), chain: z.enum(CHAIN_IDS), tier: z.enum(["basic", "premium"]).default("premium"), creditBurn: optionalCreditBurnProofSchema })
 
 export async function POST(request: Request) {
   try {

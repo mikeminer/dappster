@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { revalidateTag } from "next/cache"
 import { z } from "zod"
 import { CREDIT_COSTS, assertCredits, hasActivePro } from "@/lib/credits"
-import { creditBurnProofSchema, verifyAndSpendCreditBurn } from "@/lib/credit-burn"
+import { optionalCreditBurnProofSchema, verifyAndSpendCreditBurn } from "@/lib/credit-burn"
 import { deployFrontendToIPFS } from "@/lib/pinata"
 import { getRequestUser } from "@/lib/runtime"
 import { localCredits, localGetDapp, localSpend, localUpdateDapp } from "@/lib/local-store"
@@ -21,7 +21,7 @@ const schema = z.object({
   contractTxHash: z.string().regex(/^0x[0-9a-fA-F]{64}$/).optional(),
   contractChainId: z.number().int().positive().optional(),
   solanaCluster: z.enum(["devnet", "mainnet-beta"]).optional(),
-  creditBurn: creditBurnProofSchema.optional(),
+  creditBurn: optionalCreditBurnProofSchema,
 })
 
 export async function POST(request: Request) {
