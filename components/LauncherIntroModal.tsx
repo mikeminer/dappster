@@ -4,11 +4,31 @@ import Image from "next/image"
 import { ExternalLink, X } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 
-const SESSION_KEY = "dappster:launcher-intro:v2"
+const SESSION_KEY = "dappster:launcher-intro:v3"
 const CREATOR_URL = "https://www.base.org/name/pappardelle"
 const CREATOR_TOKEN_URL = "https://pappardellefaucet.vercel.app/"
+const PASTA_TOKEN_URL = "https://pump.fun/coin/39kMeX4HVRW9qbbiHSPbRQ9xeXUF18GrNP6gL61Ppump"
 const SUBSCRIPTION_CONTRACT = "0xea7e37d45b6f75ae6826c1925d7b0ac314c7ecae"
 const CONTRACT_URL = `https://basescan.org/address/${SUBSCRIPTION_CONTRACT}`
+
+const DEPLOYMENT_BENEFITS = [
+  {
+    ecosystem: "EVM",
+    amount: "50,000,000 pappardelle",
+    description: "Link the qualifying EVM wallet for unlimited EVM generations and security audits while preparing deployments across supported networks.",
+    disclaimer: "The 0.001 native-token deployment fee and network gas still apply.",
+    href: CREATOR_TOKEN_URL,
+    logo: "/chain-logos/ethereum.svg",
+  },
+  {
+    ecosystem: "Solana",
+    amount: "10,000,000 PASTA",
+    description: "Link the qualifying Solana mainnet wallet for unlimited generations and security audits on Solana mainnet and devnet.",
+    disclaimer: "Program rent, network fees and IPFS publishing costs still apply.",
+    href: PASTA_TOKEN_URL,
+    logo: "/chain-logos/solana.svg",
+  },
+] as const
 
 export function LauncherIntroModal() {
   const [open, setOpen] = useState(false)
@@ -62,6 +82,23 @@ export function LauncherIntroModal() {
           Discover the Pappardelle creator token on Base
           <ExternalLink size={14} aria-hidden="true" />
         </a>
+        <div className="launcher-intro-benefits" aria-label="Token holder deployment benefits">
+          <p className="launcher-intro-benefits-title">Hold tokens. Build for deployment without generation or audit fees.</p>
+          <div className="launcher-intro-benefits-grid">
+            {DEPLOYMENT_BENEFITS.map(benefit => (
+              <a className="launcher-intro-benefit" href={benefit.href} target="_blank" rel="noopener noreferrer" key={benefit.ecosystem}>
+                <span className="launcher-intro-benefit-logo"><Image src={benefit.logo} alt="" width={30} height={30} /></span>
+                <span className="launcher-intro-benefit-copy">
+                  <small>{benefit.ecosystem} HOLDER BENEFIT</small>
+                  <strong>Hold {benefit.amount}</strong>
+                  <span>{benefit.description}</span>
+                  <em>{benefit.disclaimer}</em>
+                </span>
+                <ExternalLink size={14} aria-hidden="true" />
+              </a>
+            ))}
+          </div>
+        </div>
         <a className="launcher-intro-contract" href={CONTRACT_URL} target="_blank" rel="noopener noreferrer">
           <span className="launcher-intro-base-logo"><Image src="/chain-logos/base.svg" alt="Base" width={42} height={42} /></span>
           <span><small>SUBSCRIPTION SMART CONTRACT</small><strong>Based on Base</strong><code>{SUBSCRIPTION_CONTRACT.slice(0, 10)}…{SUBSCRIPTION_CONTRACT.slice(-8)}</code></span>

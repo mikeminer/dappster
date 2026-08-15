@@ -351,7 +351,7 @@ button { color: inherit; }
 .wallet-modal-backdrop { z-index: 1000; isolation: isolate; }
 .modal { width: min(430px, 100%); max-height: calc(100dvh - 40px); overflow-y: auto; overscroll-behavior: contain; background: #101216; border: 1px solid #30353d; border-radius: 12px; box-shadow: 0 30px 100px #000; }
 .launcher-intro-backdrop { z-index: 140; background: radial-gradient(circle at 50% 25%, rgba(199,255,50,.1), transparent 38%), rgba(0,0,0,.82); }
-.launcher-intro-modal { position: relative; width: min(500px, 100%); padding: 34px; overflow: hidden; border-color: rgba(199,255,50,.3); background: linear-gradient(145deg, rgba(199,255,50,.055), transparent 38%), #0d0f12; text-align: center; }
+.launcher-intro-modal { position: relative; width: min(680px, 100%); padding: 34px; border-color: rgba(199,255,50,.3); background: linear-gradient(145deg, rgba(199,255,50,.055), transparent 38%), #0d0f12; text-align: center; }
 .launcher-intro-modal::before { content: ""; position: absolute; inset: 0 0 auto; height: 2px; background: linear-gradient(90deg, transparent, var(--acid), transparent); }
 .launcher-intro-mark { width: 62px; height: 62px; margin: 0 auto 16px; display: grid; place-items: center; border: 1px solid rgba(199,255,50,.38); border-radius: 15px; color: #050700; background: var(--acid); box-shadow: 0 0 34px rgba(199,255,50,.16); transform: rotate(-4deg); }
 .launcher-intro-mark span { font-size: 38px; font-weight: 950; letter-spacing: -.08em; transform: rotate(4deg); }
@@ -363,6 +363,19 @@ button { color: inherit; }
 .launcher-intro-creator:hover strong { color: var(--acid); }
 .launcher-intro-token { margin-top: 12px; padding: 10px 12px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid rgba(184,255,31,.3); border-radius: 8px; color: var(--acid); background: rgba(184,255,31,.05); font-size: 11px; font-weight: 750; text-decoration: none; transition: border-color .16s ease, background .16s ease; }
 .launcher-intro-token:hover { border-color: var(--acid); background: rgba(184,255,31,.1); }
+.launcher-intro-benefits { margin-top: 17px; text-align: left; }
+.launcher-intro-benefits-title { margin: 0 0 9px; color: #dce1e7; font-size: 12px; font-weight: 800; text-align: center; }
+.launcher-intro-benefits-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.launcher-intro-benefit { min-width: 0; padding: 13px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 10px; border: 1px solid #2b3138; border-radius: 10px; color: inherit; background: rgba(0,0,0,.24); text-decoration: none; transition: border-color .16s ease, background .16s ease, transform .16s ease; }
+.launcher-intro-benefit:hover { border-color: rgba(199,255,50,.62); background: rgba(199,255,50,.055); transform: translateY(-1px); }
+.launcher-intro-benefit-logo { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid #303740; border-radius: 50%; background: #11151a; }
+.launcher-intro-benefit-logo img { display: block; width: 26px; height: 26px; }
+.launcher-intro-benefit-copy { min-width: 0; display: grid; gap: 4px; }
+.launcher-intro-benefit-copy small { color: var(--acid); font: 700 8px/1.3 "SFMono-Regular", Consolas, monospace; letter-spacing: .08em; }
+.launcher-intro-benefit-copy strong { color: #f3f5f7; font-size: 12px; line-height: 1.35; }
+.launcher-intro-benefit-copy > span { color: #8c959f; font-size: 9px; line-height: 1.5; }
+.launcher-intro-benefit-copy em { color: #646e79; font-size: 8px; font-style: normal; line-height: 1.4; }
+.launcher-intro-benefit > svg { margin-top: 2px; color: #68717d; }
 .launcher-intro-contract { margin: 14px 0; padding: 15px; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 13px; border: 1px solid #2d343c; border-radius: 10px; color: inherit; background: rgba(0,0,0,.22); text-align: left; text-decoration: none; transition: border-color .16s ease, background .16s ease; }
 .launcher-intro-contract:hover { border-color: #4d6fff; background: rgba(45,84,255,.06); }
 .launcher-intro-base-logo { width: 46px; height: 46px; display: grid; place-items: center; border-radius: 50%; background: white; }
@@ -375,6 +388,8 @@ button { color: inherit; }
 .launcher-intro-enter { min-height: 47px; }
 @media (max-width: 520px) {
   .launcher-intro-modal { padding: 29px 20px 22px; }
+  .launcher-intro-benefits-grid { grid-template-columns: 1fr; }
+  .launcher-intro-benefit { padding: 11px; }
   .launcher-intro-contract { grid-template-columns: auto 1fr; }
   .launcher-intro-contract > svg { display: none; }
 }
