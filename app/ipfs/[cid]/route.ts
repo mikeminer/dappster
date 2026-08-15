@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import type { Abi } from "viem"
 import { injectCompiledAbiIntoFrontend } from "@/lib/frontend-abi"
-import { buildEvmRuntimeCompatibilityScript } from "@/lib/frontend-shell"
+import { buildEvmRuntimeCompatibilityScript, rewritePreviewDependencies } from "@/lib/frontend-shell"
 import { compileSolidity } from "@/lib/solidity"
 import { supabaseRequest } from "@/lib/supabase"
 import { hydrateDappSources } from "@/lib/source-storage"
@@ -50,7 +50,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ cid
     headers.set("X-Content-Type-Options", "nosniff")
     if (contentType.includes("text/html")) {
       headers.set("Cache-Control", "no-store")
-      let html = await upstream.text()
+      let html = rewritePreviewDependencies(await upstream.text())
       let contractAbi: Abi | undefined
       let evmChainId: number | undefined
       let solanaCompatibility = buildSolanaRuntimeCompatibilityScript()
@@ -79,7 +79,10 @@ export async function GET(_request: Request, { params }: { params: Promise<{ cid
       } catch {
         // Keep the immutable IPFS artifact available even if legacy ABI recovery fails.
       }
-      const compatibility = `<script>${buildEvmRuntimeCompatibilityScript(contractAbi, evmChainId)}${solanaCompatibility}if(window.solanaWeb3)Object.assign(window,window.solanaWeb3);</script>`
+      const solanaAsset = embeddedRuntime?.chain === "solana" && !html.includes("/runtime/solana-runtime.js")
+        ? '<script src="/runtime/solana-runtime.js"></script>'
+        : ""
+      const compatibility = `${solanaAsset}<script>${buildEvmRuntimeCompatibilityScript(contractAbi, evmChainId)}${solanaCompatibility}if(window.solanaWeb3)Object.assign(window,window.solanaWeb3);</script>`
       html = html.replace('<script type="text/babel"', `${compatibility}<script type="text/babel"`)
       return new Response(html, { status: 200, headers })
     }

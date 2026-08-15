@@ -234,23 +234,20 @@ export function buildSolanaRuntimeCompatibilityScript(solanaIdl?: SolanaIdl) {
         window.__DAPPSTER_SOLANA_READY__ = Promise.resolve();
         return;
       }
-      window.__DAPPSTER_SOLANA_READY__ = (async function () {
-        if (!window.Buffer) {
-          const bufferModule = await import("https://esm.sh/buffer@6.0.3?bundle&target=es2020");
-          window.Buffer = bufferModule.Buffer;
+      window.__DAPPSTER_SOLANA_READY__ = Promise.resolve().then(function () {
+        const modules = window.__DAPPSTER_SOLANA_RUNTIME__;
+        if (!modules || !modules.web3 || !modules.anchor || !modules.splToken || !modules.Buffer) {
+          throw new Error("The self-hosted Solana runtime did not load");
         }
-        const modules = await Promise.all([
-          import("https://esm.sh/@coral-xyz/anchor@0.30.1?bundle&target=es2020"),
-          import("https://esm.sh/@solana/spl-token@0.4.15?bundle&target=es2020"),
-          import("https://esm.sh/@solana/wallet-adapter-phantom@0.9.28?bundle&target=es2020"),
-        ]);
-        Object.assign(window, modules[0], modules[1], modules[2]);
-        window.anchor = modules[0];
-        window.splToken = modules[1];
-        window.phantomWalletAdapter = modules[2];
-        window.SolanaWeb3 = window.solanaWeb3;
-        window.web3 = modules[0].web3 || window.solanaWeb3;
-        window.anchorWeb3 = window.web3;
+        window.Buffer = modules.Buffer;
+        Object.assign(window, modules.web3, modules.anchor, modules.splToken, modules.phantomWalletAdapter || {});
+        window.solanaWeb3 = modules.web3;
+        window.SolanaWeb3 = modules.web3;
+        window.anchor = modules.anchor;
+        window.splToken = modules.splToken;
+        window.phantomWalletAdapter = modules.phantomWalletAdapter || {};
+        window.web3 = modules.web3;
+        window.anchorWeb3 = modules.web3;
         if (runtime.solanaIdl) window.idl = runtime.solanaIdl;
         if (runtime.preview && window.PublicKey) {
           const OriginalPublicKey = window.PublicKey;
@@ -268,7 +265,7 @@ export function buildSolanaRuntimeCompatibilityScript(solanaIdl?: SolanaIdl) {
           try { if (window.solanaWeb3) window.solanaWeb3.PublicKey = PreviewPublicKey; } catch {}
           try { if (window.anchor && window.anchor.web3) window.anchor.web3.PublicKey = PreviewPublicKey; } catch {}
         }
-      })();
+      });
     })();
   `
 }
@@ -281,8 +278,12 @@ export function wrapSolanaBabelSource(source: string) {
       ${source}
     }).catch(function (error) {
       console.error("[Dappster Solana runtime]", error);
-      const root = document.getElementById("root");
-      if (root) root.innerHTML = '<div class="boot" style="padding:24px;text-align:center">Unable to load the Solana runtime. Reload the dApp and try again.</div>';
+      if (window.__DAPPSTER_PREVIEW__?.fail) {
+        window.__DAPPSTER_PREVIEW__.fail(error);
+      } else {
+        const root = document.getElementById("root");
+        if (root) root.innerHTML = '<div class="boot" style="padding:24px;text-align:center">Unable to load the Solana runtime. Reload the dApp and try again.</div>';
+      }
     });
   `
 }
