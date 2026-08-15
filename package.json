@@ -18,6 +18,7 @@
     "qa:evm-factory": "node scripts/verify-deployment-factory.mjs",
     "qa:ipfs-gateways": "node --no-warnings --experimental-strip-types scripts/qa-ipfs-gateways.mts",
     "qa:preview-runtime": "node scripts/qa-preview-runtime.mjs",
+    "qa:xai-provider": "node --no-warnings --experimental-strip-types scripts/qa-xai-provider.mts",
     "qa:tester-tiers": "node --no-warnings --experimental-strip-types scripts/qa-tester-tiers.mts"
   },
   "dependencies": {
