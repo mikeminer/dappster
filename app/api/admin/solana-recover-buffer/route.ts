@@ -1,4 +1,5 @@
 import bs58 from "bs58"
+import { timingSafeEqual } from "node:crypto"
 import { NextResponse } from "next/server"
 import {
   Connection,
@@ -33,11 +34,22 @@ function technicalSigner() {
   return signer
 }
 
+function hasOneTimeRecoveryAuthorization(request: Request) {
+  const expected = process.env.SOLANA_RECOVERY_TOKEN
+  const provided = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "")
+  if (!expected || !provided) return false
+  const expectedBytes = Buffer.from(expected)
+  const providedBytes = Buffer.from(provided)
+  return expectedBytes.length === providedBytes.length && timingSafeEqual(expectedBytes, providedBytes)
+}
+
 export async function POST(request: Request) {
   try {
-    const user = await getRequestUser(request)
-    if (user.isDemo || !await accountHasWallet(user.id, "evm", OWNER)) {
-      return NextResponse.json({ error: "Owner authorization required" }, { status: 403 })
+    if (!hasOneTimeRecoveryAuthorization(request)) {
+      const user = await getRequestUser(request)
+      if (user.isDemo || !await accountHasWallet(user.id, "evm", OWNER)) {
+        return NextResponse.json({ error: "Owner authorization required" }, { status: 403 })
+      }
     }
 
     const signer = technicalSigner()
