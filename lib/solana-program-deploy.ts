@@ -543,7 +543,7 @@ async function sendLoaderTransaction(
   transaction: Transaction,
   signers: Keypair[],
   label: string,
-  options: { rateLimitRetries?: number } = {},
+  options: { rateLimitRetries?: number; skipPreflight?: boolean } = {},
 ) {
   const rateLimitRetries = options.rateLimitRetries ?? 0
   for (let attempt = 0; ; attempt += 1) {
@@ -551,6 +551,7 @@ async function sendLoaderTransaction(
       return await sendAndConfirmTransaction(connection, transaction, signers, {
         commitment: "confirmed",
         preflightCommitment: "confirmed",
+        skipPreflight: options.skipPreflight ?? false,
         maxRetries: 20,
       })
     } catch (error) {
@@ -569,6 +570,25 @@ async function sendLoaderTransaction(
       throw new Error(`${label} failed: ${message}${logs?.length ? `\n${logs.join("\n")}` : ""}`)
     }
   }
+}
+
+async function waitForExecutableUpgradeableProgram(
+  connection: Connection,
+  program: PublicKey,
+  timeoutMs = 30_000,
+) {
+  const deadline = Date.now() + timeoutMs
+  do {
+    try {
+      const account = await connection.getAccountInfo(program, "confirmed")
+      if (account?.executable && account.owner.equals(BPF_LOADER_UPGRADEABLE_PROGRAM_ID)) return true
+    } catch {
+      // Confirmation errors are ambiguous. Keep checking the deployment
+      // post-condition until the bounded recovery window expires.
+    }
+    await new Promise(resolve => setTimeout(resolve, 1_000))
+  } while (Date.now() < deadline)
+  return false
 }
 
 async function retryRpcRateLimit<T>(operation: () => Promise<T>, label: string) {
@@ -783,21 +803,31 @@ export async function deployCompiledSolanaProgram(
       await sendProgramWriteBatch(connection, payer, buffer.publicKey, writes, publicRpc)
     }
 
-    await sendLoaderTransaction(
-      connection,
-      new Transaction().add(
-        SystemProgram.createAccount({
-          fromPubkey: payer.publicKey,
-          newAccountPubkey: selectedProgram.publicKey,
-          lamports: programRent,
-          space: UPGRADEABLE_PROGRAM_BYTES,
-          programId: BPF_LOADER_UPGRADEABLE_PROGRAM_ID,
-        }),
-        deployUpgradeableInstruction(payer.publicKey, selectedProgram.publicKey, buffer.publicKey, artifact.length),
-      ),
-      [payer, selectedProgram],
-      "Upgradeable program deployment",
-    )
+    try {
+      await sendLoaderTransaction(
+        connection,
+        new Transaction().add(
+          SystemProgram.createAccount({
+            fromPubkey: payer.publicKey,
+            newAccountPubkey: selectedProgram.publicKey,
+            lamports: programRent,
+            space: UPGRADEABLE_PROGRAM_BYTES,
+            programId: BPF_LOADER_UPGRADEABLE_PROGRAM_ID,
+          }),
+          deployUpgradeableInstruction(payer.publicKey, selectedProgram.publicKey, buffer.publicKey, artifact.length),
+        ),
+        [payer, selectedProgram],
+        "Upgradeable program deployment",
+        // Some mainnet RPC providers return a simulation error even when all
+        // loader instructions report success. The fully signed transaction is
+        // safe to submit here because the buffer writes were already confirmed.
+        { skipPreflight: true },
+      )
+    } catch (error) {
+      // A confirmation request can fail after the transaction landed. Accept
+      // only the exact on-chain post-condition; otherwise preserve the error.
+      if (!await waitForExecutableUpgradeableProgram(connection, selectedProgram.publicKey)) throw error
+    }
     bufferCreated = false
   } catch (error) {
     if (bufferCreated) {
