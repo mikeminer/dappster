@@ -272,23 +272,22 @@ async function recoverConfirmedSolanaFunding(connection: Connection, quote: Sola
   }
   const recent = await retryRead(() => connection.getSignaturesForAddress(payer, { limit: 25 }, "confirmed"))
   if (!recent.length) return null
-  // Public Solana RPCs frequently reject a 25-item getTransactions batch.
-  // Read small groups with exponential backoff and stop as soon as the
-  // unique funding memo is found, avoiding both duplicate transfers and 429s.
-  for (let offset = 0; offset < recent.length; offset += 5) {
-    const signatures = recent.slice(offset, offset + 5)
-    const transactions = await retryRead(() => connection.getParsedTransactions(signatures.map(item => item.signature), {
+  // Some production Solana RPC providers return a single JSON-RPC object for
+  // batch requests. web3.js expects an array and throws `unsafeRes.map is not
+  // a function`, so read transactions individually for provider compatibility.
+  // Sequential requests also reduce 429s on public and shared endpoints.
+  for (const item of recent) {
+    const transaction = await retryRead(() => connection.getParsedTransaction(item.signature, {
       commitment: "confirmed",
       maxSupportedTransactionVersion: 0,
     }))
-    const index = transactions.findIndex(transaction => transactionMatchesFunding(transaction, {
+    if (transactionMatchesFunding(transaction, {
       wallet,
       payer,
       lamports: quote.requiredLamports,
       memo: quote.memo,
-    }))
-    if (index >= 0) return signatures[index].signature
-    if (offset + 5 < recent.length) await new Promise(resolve => setTimeout(resolve, 250))
+    })) return item.signature
+    await new Promise(resolve => setTimeout(resolve, 150))
   }
   return null
 }
