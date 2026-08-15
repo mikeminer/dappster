@@ -3,10 +3,10 @@ import { DAPPSTER_FEE_SOLIDITY_REQUIREMENTS, hasRequiredDeploymentFee } from "@/
 import { getChainAdapter } from "@/lib/chain-adapters"
 import { compileSolidity } from "@/lib/solidity"
 import { parseMoveSourceBundle } from "@/lib/move-source-bundle"
+import { callXAI } from "@/lib/xai-provider"
 
 type Generation = { contract: string; contractName?: string; programName?: string; frontend: string; deployInstructions: string; warnings: string[] }
 type GenerationOptions = { evmChainId?: number; signal?: AbortSignal }
-type XAIWorkload = "generation" | "repair" | "audit"
 
 const evmPrompt = `You are an expert Solidity developer. Generate one production-ready, directly deployable smart contract using Solidity ^0.8.20, OpenZeppelin 5.x where possible, NatSpec, checks-effects-interactions, events, and sensible defaults. The main contract MUST have a zero-argument constructor so it can be deployed non-custodially from the browser; use msg.sender as the initial owner and expose owner-only configuration functions when customization is needed. ${DAPPSTER_FEE_SOLIDITY_REQUIREMENTS} Return only strict JSON with contract, contractName, frontend, deployInstructions, warnings. The Solidity source itself MUST compile. When embedding JSON, SVG, or another double-quoted format in Solidity, wrap those fragments in single-quoted Solidity string literals or escape every embedded double quote; never emit an unescaped construct such as "data:application/json,{"name":...". The frontend must be one complete React component using ethers v6, hooks, Tailwind classes, wallet connection, all contract interactions, and read the deployed address from window.__DAPPSTER__.contractAddress. Declare the main contract interface in a constant named ABI and include every callable function, event, custom error, and public-state-variable getter. Dappster will replace ABI with the authoritative compiler output before preview and publication. In every transaction catch block display window.__DAPPSTER__.decodeError(error), never error.shortMessage or error.message directly.`
 const solanaPrompt = `You are an expert Solana developer using Anchor ^0.30. Use safe PDA derivation, signer and ownership validation, proper errors, checked arithmetic, and validated CPI program IDs. Anchor assertion helpers are macros: always write require!(...), require_eq!(...), require_neq!(...), require_keys_eq!(...), require_keys_neq!(...), require_gt!(...), and require_gte!(...) with the exclamation mark; never call them as functions. Return only strict JSON with contract, programName, frontend, deployInstructions, warnings. The frontend must be one complete React component using @solana/web3.js and Anchor with Phantom wallet connection.`
@@ -42,20 +42,6 @@ function assertGenerationStructure(generation: Generation, chain: Chain) {
     if (!/anchor_lang::prelude::\*/.test(generation.contract)) throw new Error("Generated Solana source is missing the Anchor prelude")
   }
   if (chain === "sui" || chain === "aptos") parseMoveSourceBundle(generation.contract, chain)
-}
-
-function xaiModelFor(workload: XAIWorkload) {
-  if (workload === "generation") return process.env.XAI_GENERATION_MODEL || "grok-4.20-0309-non-reasoning"
-  if (workload === "repair") return process.env.XAI_REPAIR_MODEL || process.env.XAI_MODEL || "grok-4.5"
-  return process.env.XAI_AUDIT_MODEL || process.env.XAI_MODEL || "grok-4.5"
-}
-
-async function callXAI(system: string, prompt: string, workload: XAIWorkload = "generation", signal?: AbortSignal) {
-  if (!process.env.XAI_API_KEY) throw new Error("XAI_API_KEY is not configured")
-  const response = await fetch("https://api.x.ai/v1/chat/completions", { method: "POST", signal, headers: { Authorization: `Bearer ${process.env.XAI_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: xaiModelFor(workload), temperature: workload === "generation" ? 0.2 : 0, response_format: { type: "json_object" }, messages: [{ role: "system", content: system }, { role: "user", content: prompt }] }) })
-  if (!response.ok) throw new Error(`Generation provider failed (${response.status})`)
-  const json = await response.json() as { choices: { message: { content: string } }[] }
-  return json.choices[0]?.message.content
 }
 
 async function callClaude(system: string, prompt: string) {
