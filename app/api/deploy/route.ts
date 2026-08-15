@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { revalidateTag } from "next/cache"
 import { z } from "zod"
-import { CREDIT_COSTS, assertCredits, hasActivePro } from "@/lib/credits"
+import { CREDIT_COSTS, getCredits, hasActivePro } from "@/lib/credits"
 import { optionalCreditBurnProofSchema, verifyAndSpendCreditBurn } from "@/lib/credit-burn"
 import { deployFrontendToIPFS } from "@/lib/pinata"
 import { getRequestUser } from "@/lib/runtime"
@@ -11,6 +11,8 @@ import { verifyEvmContractDeployment } from "@/lib/contract-deployment"
 import { verifySolanaProgramDeployment } from "@/lib/solana-deployment"
 import { compileSolidity } from "@/lib/solidity"
 import { injectCompiledAbiIntoFrontend } from "@/lib/frontend-abi"
+import { getSolanaTesterEntitlement } from "@/lib/pasta-developer-tier"
+import { getEvmTesterEntitlement } from "@/lib/pappardelle-tester-tier"
 import type { Abi } from "viem"
 
 const schema = z.object({
@@ -28,15 +30,19 @@ export async function POST(request: Request) {
   try {
     const user = await getRequestUser(request)
     const input = schema.parse(await request.json())
-    const profile = user.isDemo ? { credits: localCredits(user.id), plan: "free" } : await assertCredits(user.id, CREDIT_COSTS.deploy)
+    const profile = user.isDemo ? { credits: localCredits(user.id), plan: "free" } : await getCredits(user.id)
     const activePro = hasActivePro(profile)
-    if (!activePro && profile.credits < CREDIT_COSTS.deploy) throw new Error(`You need ${CREDIT_COSTS.deploy} credits for this action`)
     const localDapp = user.isDemo ? localGetDapp(input.dappId) : undefined
     const rows = user.isDemo ? [] : await supabaseRequest<{ name: string; frontend_code: string; contract_code: string; chain: string; contract_address: string | null; contract_chain_id: number | null }[]>({ path: "dapps", query: { id: `eq.${input.dappId}`, owner_id: `eq.${user.id}`, select: "name,frontend_code,contract_code,chain,contract_address,contract_chain_id", limit: "1" } })
     if (!user.isDemo && !rows[0]) throw new Error("dApp not found")
     let frontendCode = user.isDemo ? localDapp?.frontend_code || input.frontendCode : rows[0].frontend_code
     const chain = user.isDemo ? localDapp?.chain || input.chain : rows[0].chain
     let contractAddress = user.isDemo ? localDapp?.contract_address || input.contractAddress : rows[0].contract_address
+    const solanaTester = !user.isDemo && chain === "solana" ? await getSolanaTesterEntitlement(user.id) : null
+    const evmTester = !user.isDemo && chain === "evm" ? await getEvmTesterEntitlement(user.id) : null
+    const testerAccessMode = solanaTester?.eligible ? "solana-tester" : evmTester?.eligible ? "evm-tester" : null
+    const freeDeployment = activePro || Boolean(testerAccessMode)
+    if (!freeDeployment && profile.credits < CREDIT_COSTS.deploy) throw new Error(`You need ${CREDIT_COSTS.deploy} credits for this action`)
     const evmChainId = chain === "evm"
       ? input.contractChainId || localDapp?.contract_chain_id || rows[0]?.contract_chain_id || undefined
       : undefined
@@ -84,7 +90,7 @@ export async function POST(request: Request) {
       if (!input.solanaCluster) throw new Error("Seleziona il cluster Solana usato per il deploy")
       await verifySolanaProgramDeployment({ programId: contractAddress, cluster: input.solanaCluster })
     }
-    const creditsRemaining = activePro ? profile.credits
+    const creditsRemaining = freeDeployment ? profile.credits
       : user.isDemo ? localSpend(user.id, CREDIT_COSTS.deploy)
         : await verifyAndSpendCreditBurn(user.id, CREDIT_COSTS.deploy, "IPFS deployment", input.creditBurn)
     if (user.isDemo && localDapp) localUpdateDapp(input.dappId, { deploy_status: "deploying", frontend_code: frontendCode })
@@ -94,7 +100,7 @@ export async function POST(request: Request) {
       if (user.isDemo && localDapp) localUpdateDapp(input.dappId, { ipfs_hash: deployed.cid, ipfs_url: deployed.url, deploy_status: "live" })
       else if (!user.isDemo) await supabaseRequest({ path: "dapps", method: "PATCH", query: { id: `eq.${input.dappId}`, owner_id: `eq.${user.id}` }, body: { ipfs_hash: deployed.cid, ipfs_url: deployed.url, deploy_status: "live", updated_at: new Date().toISOString() } })
       revalidateTag("public-dapps")
-      return NextResponse.json({ dappId: input.dappId, status: "live", ...deployed, creditsRemaining, mode: user.isDemo ? "local" : "supabase" })
+      return NextResponse.json({ dappId: input.dappId, status: "live", ...deployed, creditsRemaining, accessMode: testerAccessMode || (activePro ? "pro" : "credits"), mode: user.isDemo ? "local" : "supabase" })
     } catch (error) {
       if (user.isDemo && localDapp) localUpdateDapp(input.dappId, { deploy_status: "failed" })
       else if (!user.isDemo) await supabaseRequest({ path: "dapps", method: "PATCH", query: { id: `eq.${input.dappId}`, owner_id: `eq.${user.id}` }, body: { deploy_status: "failed" } })

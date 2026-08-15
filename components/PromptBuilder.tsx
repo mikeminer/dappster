@@ -631,7 +631,7 @@ export function PromptBuilder() {
   async function publishFrontend(currentContract: ContractDeployment) {
     if (!generation) return
     setDeployStage("burning")
-    const creditBurn = await burnCreditsFromUserWallet(2, "IPFS frontend deployment")
+    const creditBurn = await burnCreditsFromUserWallet(2, `${chain.toUpperCase()} IPFS frontend deployment`)
     setDeployStage("pinning")
     const output = await apiFetch<Deployment>("/api/deploy", {
       method: "POST",
