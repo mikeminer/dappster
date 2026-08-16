@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AlertCircle, Check, Copy, Eye, ExternalLink, Loader2, Rocket, Sparkles, X } from "lucide-react"
 import { useWallet } from "@solana/wallet-adapter-react"
 import bs58 from "bs58"
@@ -412,12 +412,55 @@ export function PromptBuilder() {
   const [tab, setTab] = useState<"contract" | "frontend" | "instructions">("contract")
   const [copied, setCopied] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
+  const [previewFailure, setPreviewFailure] = useState("")
+  const [regeneratingFrontend, setRegeneratingFrontend] = useState(false)
   const [recoveryTxHash, setRecoveryTxHash] = useState("")
   const [error, setError] = useState("")
   const [repairNotice, setRepairNotice] = useState("")
   const generationAbortRef = useRef<AbortController | null>(null)
   const generationRunRef = useRef(0)
   const solanaFundingApprovalRef = useRef<(() => void) | null>(null)
+  const previewFrameRef = useRef<HTMLIFrameElement | null>(null)
+
+  const regenerateFrontend = useCallback(async (failure: string) => {
+    if (!generation || regeneratingFrontend) return
+    setRegeneratingFrontend(true)
+    setError("")
+    try {
+      const result = await apiFetch<{ frontend: string }>("/api/generate/frontend", {
+        method: "POST",
+        body: JSON.stringify({
+          dappId: generation.dappId,
+          previewError: failure || previewFailure || "The frontend preview failed to start",
+          evmChainId: chain === "evm" ? evmChainId : undefined,
+        }),
+      })
+      const repairedGeneration = { ...generation, frontend: result.frontend }
+      setGeneration(repairedGeneration)
+      setPreviewFailure("")
+      setTab("frontend")
+      setRepairNotice("Dappster regenerated only the frontend and preserved the existing smart contract. The preview has been reloaded with the repaired source.")
+      rememberProject(repairedGeneration, prompt, chain, contractDeployment || undefined, deployment || undefined, chain === "evm" ? evmChainId : undefined, chain === "solana" ? solanaCluster : undefined)
+    } catch (cause) {
+      setPreviewOpen(false)
+      setError(cause instanceof Error ? cause.message : "Could not regenerate the frontend")
+    } finally {
+      setRegeneratingFrontend(false)
+    }
+  }, [generation, regeneratingFrontend, previewFailure, chain, evmChainId, prompt, contractDeployment, deployment, solanaCluster])
+
+  useEffect(() => {
+    if (!previewOpen) return
+    const onPreviewMessage = (event: MessageEvent) => {
+      if (event.source !== previewFrameRef.current?.contentWindow) return
+      const data = event.data as { source?: string; type?: string; message?: string } | null
+      if (!data || data.source !== "dappster-preview") return
+      if (data.type === "error") setPreviewFailure(data.message || "The frontend preview failed to start")
+      if (data.type === "regenerate") void regenerateFrontend(data.message || previewFailure)
+    }
+    window.addEventListener("message", onPreviewMessage)
+    return () => window.removeEventListener("message", onPreviewMessage)
+  }, [previewOpen, previewFailure, regenerateFrontend])
 
   useEffect(() => () => generationAbortRef.current?.abort(), [])
 
@@ -1293,7 +1336,7 @@ export function PromptBuilder() {
         </div>
         {generation ? <><div className="code-tabs"><button className={`code-tab ${tab === "contract" ? "active" : ""}`} onClick={() => setTab("contract")}>{chain === "evm" ? `${generation.name}.sol` : selectedAdapter.sourceFile}</button><button className={`code-tab ${tab === "frontend" ? "active" : ""}`} onClick={() => setTab("frontend")}>App.tsx</button><button className={`code-tab ${tab === "instructions" ? "active" : ""}`} onClick={() => setTab("instructions")}>Deploy.md</button></div><pre className="code-content">{output}</pre>{generation.warnings?.length > 0 && <div className="warning-list"><strong>Model warnings</strong>{generation.warnings.map(warning => <span key={warning}>• {warning}</span>)}</div>}{contractDeployment && <div className="deploy-result"><div><span className="status"><span className="status-dot" /> {selectedAdapter.contractNoun} confirmed on-chain</span><div className="mono">{contractDeployment.address}</div></div>{contractExplorer && <a href={contractExplorer} target="_blank" rel="noreferrer" className="btn btn-outline">Explorer <ExternalLink size={14} /></a>}</div>}{deployment && <div className="deploy-result"><div><span className="status"><span className="status-dot" /> Frontend live on IPFS</span><div className="mono">{deployment.cid}</div></div><a href={deployment.url} target="_blank" rel="noreferrer" className="btn btn-primary">Open <ExternalLink size={14} /></a></div>}</> : <div className="empty-state"><div><div className="empty-icon"><Sparkles size={24} /></div><strong style={{color:"#abb1b9",fontSize:14}}>Your generated dApp will appear here</strong><p style={{fontSize:12,maxWidth:300,lineHeight:1.6}}>Choose a chain, describe the product, and Dappster will call Grok to generate the contract and interface.</p></div></div>}
       </section>
-      {previewOpen && <div className="modal-backdrop" onMouseDown={() => setPreviewOpen(false)}><div className="preview-modal" role="dialog" aria-modal="true" aria-label="Frontend preview" onMouseDown={event => event.stopPropagation()}><div className="preview-toolbar"><div><strong>Frontend preview</strong><small>Isolated preview · no contract deployment or wallet transaction</small></div><button className="btn btn-ghost" onClick={() => setPreviewOpen(false)} aria-label="Close preview"><X size={16} /></button></div><iframe className="preview-frame" title={`${generation?.name || "dApp"} frontend preview`} sandbox="allow-scripts" referrerPolicy="no-referrer" srcDoc={previewHtml} /></div></div>}
+      {previewOpen && <div className="modal-backdrop" onMouseDown={() => setPreviewOpen(false)}><div className="preview-modal" role="dialog" aria-modal="true" aria-label="Frontend preview" onMouseDown={event => event.stopPropagation()}><div className="preview-toolbar"><div><strong>Frontend preview</strong><small>{regeneratingFrontend ? "Regenerating frontend…" : "Isolated preview · no contract deployment or wallet transaction"}</small></div><button className="btn btn-ghost" onClick={() => setPreviewOpen(false)} aria-label="Close preview"><X size={16} /></button></div><iframe ref={previewFrameRef} className="preview-frame" title={`${generation?.name || "dApp"} frontend preview`} sandbox="allow-scripts" referrerPolicy="no-referrer" srcDoc={previewHtml} /></div></div>}
     </div>
   )
 }
