@@ -208,7 +208,19 @@ export function inferLegacySolanaIdl(frontendSource: string, programId: string):
 export function injectCompiledSolanaIdl(frontendSource: string, idl: SolanaIdl, programId: string) {
   const encoded = JSON.stringify({ ...idl, address: programId }).replace(/</g, "\\u003c")
   let source = replaceSolanaProgramId(frontendSource, programId)
-  source = source.replace(/new\s+Program\s*\(\s*(?:idl|IDL)\s*,/g, "new Program(window.__DAPPSTER__.solanaIdl,")
+  // Anchor 0.30 reads the program address from idl.address and accepts the
+  // provider as its second argument. Generated frontends sometimes still use
+  // the pre-0.30 (idl, programId, provider) constructor, which successfully
+  // connects Phantom and then throws while creating Program. Normalize both
+  // imported Program and namespace-qualified anchor.Program constructions.
+  source = source.replace(
+    /new\s+((?:anchor\s*\.\s*)?Program)\s*\(\s*(?:idl|IDL|window\.__DAPPSTER__\.solanaIdl)\s*,\s*(?:PROGRAM_ID|programId|new\s+PublicKey\s*\([^)]*\))\s*,\s*([A-Za-z_$][\w$]*)\s*\)/g,
+    "new $1(window.__DAPPSTER__.solanaIdl, $2)",
+  )
+  source = source.replace(
+    /new\s+((?:anchor\s*\.\s*)?Program)\s*\(\s*(?:idl|IDL)\s*,/g,
+    "new $1(window.__DAPPSTER__.solanaIdl,",
+  )
   const bootstrap = `/* ${SOLANA_RUNTIME_MARKER} */\nwindow.__DAPPSTER__ = Object.assign({}, window.__DAPPSTER__ || {}, { solanaIdl: ${encoded} });\n`
   return source.includes(SOLANA_RUNTIME_MARKER)
     ? source.replace(/\/\* dappster-solana-runtime-v1 \*\/\r?\nwindow\.__DAPPSTER__\s*=\s*[^\r\n]+\r?\n/, bootstrap)

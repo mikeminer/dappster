@@ -1,5 +1,9 @@
 import assert from "node:assert/strict"
-import { buildSolanaImportAliases, buildSolanaRuntimeCompatibilityScript } from "../lib/solana-frontend.ts"
+import {
+  buildSolanaImportAliases,
+  buildSolanaRuntimeCompatibilityScript,
+  injectCompiledSolanaIdl,
+} from "../lib/solana-frontend.ts"
 
 const runtime = buildSolanaRuntimeCompatibilityScript()
 
@@ -55,5 +59,35 @@ assert.match(aliases, /const PublicKey = window\.solanaWeb3\.PublicKey;/)
 assert.match(aliases, /const Anchor = \(window\.anchor\.default \|\| window\.anchor\);/)
 assert.match(aliases, /const anchorWeb3 = window\.anchor\.web3;/)
 assert.match(aliases, /const PhantomWalletAdapter = window\.phantomWalletAdapter\.PhantomWalletAdapter;/)
+
+const compiledIdl = {
+  address: "11111111111111111111111111111111",
+  metadata: { name: "counter", version: "0.1.0", spec: "0.1.0" },
+  instructions: [],
+}
+const deployedProgramId = "BPFLoaderUpgradeab1e11111111111111111111111"
+const normalizedLegacyProgram = injectCompiledSolanaIdl(`
+  const prog = new anchor.Program(IDL, PROGRAM_ID, anchorProvider);
+  const imported = new Program(idl, new PublicKey("11111111111111111111111111111111"), provider);
+`, compiledIdl, deployedProgramId)
+assert.match(
+  normalizedLegacyProgram,
+  /new anchor\.Program\(window\.__DAPPSTER__\.solanaIdl, anchorProvider\)/,
+)
+assert.match(
+  normalizedLegacyProgram,
+  /new Program\(window\.__DAPPSTER__\.solanaIdl, provider\)/,
+)
+assert.doesNotMatch(normalizedLegacyProgram, /new (?:anchor\.)?Program\([^;]+PROGRAM_ID/)
+
+const normalizedModernProgram = injectCompiledSolanaIdl(
+  "const prog = new anchor.Program(IDL, anchorProvider);",
+  compiledIdl,
+  deployedProgramId,
+)
+assert.match(
+  normalizedModernProgram,
+  /new anchor\.Program\(window\.__DAPPSTER__\.solanaIdl, anchorProvider\)/,
+)
 
 console.log("Solana frontend runtime compatibility checks passed")
