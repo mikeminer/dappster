@@ -3,11 +3,6 @@ import { readFile } from "node:fs/promises"
 
 const promptBuilder = await readFile(new URL("../components/PromptBuilder.tsx", import.meta.url), "utf8")
 
-assert.match(
-  promptBuilder,
-  /SOLANA_WALLET_STANDARD_CHAIN[\s\S]*devnet: "solana:devnet"[\s\S]*"mainnet-beta": "solana:mainnet"/,
-  "Wallet Standard requests must use the explicit chain identifier for each cluster.",
-)
 assert.doesNotMatch(
   promptBuilder,
   /adapter\.sendTransaction\(fundingTransaction/,
@@ -15,19 +10,15 @@ assert.doesNotMatch(
 )
 assert.match(
   promptBuilder,
-  /setDeployStage\("funding-ready"\)[\s\S]*?new Promise<void>\(resolve => \{ solanaFundingApprovalRef\.current = resolve \}\)[\s\S]*?switchPhantomToSolanaCluster\(targetSolanaCluster,[\s\S]*?signSolanaFundingForCluster\(/,
+  /setDeployStage\("funding-ready"\)[\s\S]*?new Promise<void>\(resolve => \{ solanaFundingApprovalRef\.current = resolve \}\)[\s\S]*?signSolanaFundingWithPhantom\(targetSolanaCluster,/,
   "Funding must wait for a fresh explicit user click before opening Phantom.",
 )
 assert.match(
   promptBuilder,
-  /phantom\.solana\.switchNetwork\(cluster === "devnet" \? "devnet" : "mainnet"\)/,
-  "Phantom itself must switch to the selected Solana cluster before signing.",
+  /async function signSolanaFundingWithPhantom[\s\S]*phantom\.solana\.switchNetwork\(cluster === "devnet" \? "devnet" : "mainnet"\)[\s\S]*phantom\.solana\.signTransaction\(transaction\)/,
+  "Phantom must switch and sign through the same SDK session.",
 )
-assert.match(
-  promptBuilder,
-  /feature\.signTransaction\(\{[\s\S]*account,[\s\S]*chain,[\s\S]*transaction:/,
-  "Funding must use Wallet Standard signing with an explicit chain.",
-)
+assert.doesNotMatch(promptBuilder, /wallet\?\.features\["solana:signTransaction"\]/, "Funding must not switch with one Phantom API and sign with another.")
 assert.match(
   promptBuilder,
   /rpc\.sendRawTransaction\(signedFundingBytes/,
@@ -53,10 +44,12 @@ assert.match(
   /quote\.cluster !== targetSolanaCluster/,
   "The backend quote cluster must still match the UI selection.",
 )
-assert.match(
+assert.doesNotMatch(
   promptBuilder,
-  /targetSolanaCluster === "devnet" && adapter\.standard !== true/,
-  "Devnet funding must reject legacy adapters that cannot communicate the requested chain.",
+  /adapter\.standard/,
+  "Devnet funding must not fall back to a separate Wallet Standard signing session.",
 )
+assert.match(promptBuilder, /signedTransaction\.recentBlockhash !== transaction\.recentBlockhash/, "The signed transaction must preserve the Devnet blockhash.")
+assert.match(promptBuilder, /signedTransaction\.feePayer\?\.equals\(new PublicKey\(expectedWalletAddress\)\)/, "The signed transaction must preserve the verified payer.")
 
 console.log("Solana cluster-aware funding checks passed")

@@ -30,37 +30,10 @@ const SOLANA_GENESIS_HASH: Record<SolanaDeploymentCluster, string> = {
   "mainnet-beta": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
 }
 
-const SOLANA_WALLET_STANDARD_CHAIN: Record<SolanaDeploymentCluster, string> = {
-  devnet: "solana:devnet",
-  "mainnet-beta": "solana:mainnet",
-}
-
-type SolanaWalletStandardAccount = {
-  address: string
-  chains: readonly string[]
-  features: readonly string[]
-}
-
-type SolanaWalletStandardSignTransaction = {
-  signTransaction: (...inputs: readonly {
-    account: SolanaWalletStandardAccount
-    transaction: Uint8Array
-    chain?: string
-    options?: { preflightCommitment?: "confirmed" }
-  }[]) => Promise<readonly { signedTransaction: Uint8Array }[]>
-}
-
-type ClusterAwareSolanaAdapter = {
-  standard?: boolean
-  wallet?: {
-    accounts: readonly SolanaWalletStandardAccount[]
-    features: Record<string, unknown>
-  }
-}
-
-async function switchPhantomToSolanaCluster(
+async function signSolanaFundingWithPhantom(
   cluster: SolanaDeploymentCluster,
   expectedWalletAddress: string,
+  transaction: Transaction,
 ) {
   const [{ createPhantom }, { createSolanaPlugin }] = await Promise.all([
     import("@phantom/browser-injected-sdk"),
@@ -81,32 +54,18 @@ async function switchPhantomToSolanaCluster(
   if (phantom.solana.publicKey && phantom.solana.publicKey !== expectedWalletAddress) {
     throw new Error(`Phantom switched to account ${phantom.solana.publicKey}, but Dappster expects ${expectedWalletAddress}. No SOL was sent.`)
   }
-}
-
-async function signSolanaFundingForCluster(
-  adapter: ClusterAwareSolanaAdapter,
-  walletAddress: string,
-  transaction: Transaction,
-  cluster: SolanaDeploymentCluster,
-) {
-  const chain = SOLANA_WALLET_STANDARD_CHAIN[cluster]
-  const wallet = adapter.wallet
-  const account = wallet?.accounts.find(candidate => candidate.address === walletAddress)
-  const feature = wallet?.features["solana:signTransaction"] as SolanaWalletStandardSignTransaction | undefined
-  if (adapter.standard !== true || !account || !feature || !account.features.includes("solana:signTransaction")) {
-    throw new Error(`Phantom cannot sign a cluster-bound ${cluster === "devnet" ? "Devnet" : "Mainnet"} transaction. Update Phantom and reconnect. No SOL was sent.`)
+  // Network switching and signing must use the same Phantom SDK session. Mixing
+  // Browser SDK switching with Wallet Standard signing makes Phantom simulate
+  // the request against its previous (often Mainnet) network.
+  const signedTransaction = await phantom.solana.signTransaction(transaction) as Transaction
+  if (!signedTransaction.signature) throw new Error("Phantom did not sign the SOL funding transaction")
+  if (signedTransaction.recentBlockhash !== transaction.recentBlockhash) {
+    throw new Error("Phantom returned a funding transaction for a different Solana blockhash. No SOL was sent.")
   }
-  if (!account.chains.includes(chain)) {
-    throw new Error(`The connected Phantom account does not advertise ${chain}. Enable ${cluster === "devnet" ? "Devnet/Testnet mode" : "Mainnet"} in Phantom and reconnect. No SOL was sent.`)
+  if (!signedTransaction.feePayer?.equals(new PublicKey(expectedWalletAddress))) {
+    throw new Error("Phantom returned a funding transaction for a different fee payer. No SOL was sent.")
   }
-  const [output] = await feature.signTransaction({
-    account,
-    chain,
-    transaction: new Uint8Array(transaction.serialize({ requireAllSignatures: false, verifySignatures: false })),
-    options: { preflightCommitment: "confirmed" },
-  })
-  if (!output?.signedTransaction?.length) throw new Error("Phantom did not return a signed SOL funding transaction")
-  return output.signedTransaction
+  return new Uint8Array(signedTransaction.serialize())
 }
 
 type Generation = {
@@ -765,15 +724,10 @@ export function PromptBuilder() {
         if (!phantom) throw new Error("Installa o abilita Phantom per autorizzare il deploy Solana")
         const adapter = phantom.adapter as typeof phantom.adapter & {
           signMessage?: (message: Uint8Array) => Promise<Uint8Array>
-          standard?: boolean
-          wallet?: ClusterAwareSolanaAdapter["wallet"]
         }
         solana.select(adapter.name)
         if (!adapter.connected) await adapter.connect()
         if (!adapter.publicKey || !adapter.signMessage) throw new Error("Phantom cannot sign this Solana deployment")
-        if (targetSolanaCluster === "devnet" && adapter.standard !== true) {
-          throw new Error("Phantom must expose Solana Wallet Standard before Dappster can safely fund a Devnet deployment. Update Phantom, reopen Dappster, and try again. No SOL was sent.")
-        }
         const connection = new Connection(solanaEndpoint, "confirmed")
         const genesisHash = await connection.getGenesisHash()
         if (genesisHash !== SOLANA_GENESIS_HASH[targetSolanaCluster]) {
@@ -838,10 +792,9 @@ export function PromptBuilder() {
           // Keep Phantom's own network state aligned with the cluster that was already
           // verified by genesis hash. This prevents Phantom from presenting a Devnet
           // funding request with its Mainnet account state or simulation context.
-          await switchPhantomToSolanaCluster(targetSolanaCluster, adapter.publicKey.toBase58())
-          // Phantom signs an explicitly cluster-bound request, but never chooses the RPC used to
-          // broadcast it. Dappster submits the signed bytes only to the selected, verified cluster.
-          const signedFundingBytes = await signSolanaFundingForCluster(adapter, adapter.publicKey.toBase58(), fundingTransaction, targetSolanaCluster)
+          // Use the same Phantom SDK session for switching and signing. Dappster still broadcasts
+          // the signed bytes only through the selected, genesis-verified cluster RPC.
+          const signedFundingBytes = await signSolanaFundingWithPhantom(targetSolanaCluster, adapter.publicKey.toBase58(), fundingTransaction)
           const signedFunding = Transaction.from(signedFundingBytes)
           if (!signedFunding.signature) throw new Error("Phantom did not sign the SOL funding transaction")
           fundingSignature = bs58.encode(signedFunding.signature)
