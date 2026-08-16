@@ -12,10 +12,36 @@ assert.match(runtime, /Replaced an invalid Solana public key/)
 assert.match(runtime, /11111111111111111111111111111111/)
 assert.match(runtime, /window\.SolanaWeb3 = modules\.web3/)
 assert.match(runtime, /window\.anchorWeb3 = modules\.web3/)
+assert.match(runtime, /const previewProvider = \{/)
+assert.match(runtime, /if \(!window\.phantom\.solana\) window\.phantom\.solana = previewProvider/)
+assert.match(runtime, /if \(!window\.solana\) window\.solana = window\.phantom\.solana/)
+assert.match(runtime, /Wallet signing is disabled in the isolated Dappster preview/)
 assert.ok(
   runtime.indexOf("window.Buffer = modules.Buffer") < runtime.indexOf("Object.assign(window, modules.web3"),
   "Buffer must be available before the Phantom adapter module loads",
 )
+
+class MockPublicKey {
+  value: string
+  constructor(value: string) { this.value = value }
+  toBase58() { return this.value }
+}
+const previewWindow: Record<string, any> = {
+  __DAPPSTER__: { chain: "solana", preview: true },
+  __DAPPSTER_SOLANA_RUNTIME__: {
+    web3: { PublicKey: MockPublicKey },
+    anchor: { web3: { PublicKey: MockPublicKey } },
+    splToken: {},
+    Buffer: Uint8Array,
+    phantomWalletAdapter: {},
+  },
+}
+new Function("window", runtime)(previewWindow)
+await previewWindow.__DAPPSTER_SOLANA_READY__
+assert.equal(previewWindow.phantom.solana.isPhantom, true)
+assert.equal(previewWindow.solana, previewWindow.phantom.solana)
+assert.equal((await previewWindow.solana.connect()).publicKey.toBase58(), "11111111111111111111111111111111")
+await assert.rejects(() => previewWindow.solana.signTransaction({}), /Wallet signing is disabled/)
 
 const aliases = buildSolanaImportAliases(`
   import * as SolanaWeb3 from "@solana/web3.js"
