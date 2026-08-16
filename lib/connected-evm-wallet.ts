@@ -10,6 +10,16 @@ type Eip1193Provider = {
   providers?: Eip1193Provider[]
 }
 
+type Eip6963ProviderDetail = {
+  info: {
+    uuid: string
+    name: string
+    icon: string
+    rdns: string
+  }
+  provider: Eip1193Provider
+}
+
 export class LinkedEvmAccountMismatchError extends Error {
   constructor() {
     super("Connect your linked EVM wallet to continue")
@@ -67,6 +77,31 @@ function addProviderCandidate(
   if (!provider?.request || seen.has(provider)) return
   seen.add(provider)
   candidates.push({ id, provider })
+}
+
+async function discoverEip6963Providers(timeoutMs = 350) {
+  if (typeof window === "undefined") return []
+
+  const providers: Eip1193Provider[] = []
+  const seen = new Set<Eip1193Provider>()
+  const onAnnounce = (event: Event) => {
+    const detail = (event as CustomEvent<Eip6963ProviderDetail>).detail
+    if (!detail?.provider?.request || seen.has(detail.provider)) return
+    seen.add(detail.provider)
+    providers.push(detail.provider)
+  }
+
+  window.addEventListener("eip6963:announceProvider", onAnnounce)
+  try {
+    // EIP-6963 lets every installed wallet announce its own provider without
+    // competing to overwrite window.ethereum. This is essential when Zerion,
+    // Rabby, Coinbase Wallet, Phantom and similar extensions coexist.
+    window.dispatchEvent(new Event("eip6963:requestProvider"))
+    await new Promise(resolve => setTimeout(resolve, timeoutMs))
+  } finally {
+    window.removeEventListener("eip6963:announceProvider", onAnnounce)
+  }
+  return providers
 }
 
 async function activeAccount(expectedAddresses: readonly string[] = []) {
@@ -149,6 +184,9 @@ export async function getConnectedEvmWallet(chain: Chain, expectedAddresses: rea
     const seen = new Set<Eip1193Provider>()
     const reownProvider = reownAppKit?.getWalletProvider() as Eip1193Provider | undefined
     addProviderCandidate(candidates, seen, "walletConnect", reownProvider)
+    for (const provider of await discoverEip6963Providers()) {
+      addProviderCandidate(candidates, seen, "injected", provider)
+    }
     const injected = (window as Window & { ethereum?: Eip1193Provider }).ethereum
     for (const provider of injected?.providers || []) addProviderCandidate(candidates, seen, "injected", provider)
     addProviderCandidate(candidates, seen, "injected", injected)
