@@ -12,18 +12,21 @@ type IpfsGateway = { name: string; url: (cid: string) => string }
 
 function configuredPinataGateway(cid: string) {
   const configured = process.env.PINATA_GATEWAY?.trim()
-  if (!configured) return null
+  if (!configured) return []
 
   try {
     const url = new URL(/^https?:\/\//i.test(configured) ? configured : `https://${configured}`)
     const basePath = url.pathname.replace(/\/+$/, "").replace(/\/ipfs$/i, "")
-    url.pathname = `${basePath}/ipfs/${encodeURIComponent(cid)}`
-    url.search = ""
-    url.hash = ""
-    return { name: "Configured Pinata", url: url.toString() }
+    return ["files", "ipfs"].map(path => {
+      const candidate = new URL(url)
+      candidate.pathname = `${basePath}/${path}/${encodeURIComponent(cid)}`
+      candidate.search = ""
+      candidate.hash = ""
+      return { name: `Configured Pinata (${path})`, url: () => candidate.toString() }
+    })
   } catch {
     console.error("[ipfs] PINATA_GATEWAY is not a valid gateway URL")
-    return null
+    return []
   }
 }
 
@@ -60,10 +63,16 @@ async function discoverPinataGateways(fetcher: FetchLike, failures: string[]): P
       const domain = row.domain?.trim()
       if (!domain) return []
       return [domain.includes(".") ? domain : `${domain}.mypinata.cloud`]
-    }))).map(domain => ({
-      name: `Pinata dedicated (${domain})`,
-      url: (cid: string) => `https://${domain}/ipfs/${encodeURIComponent(cid)}`,
-    }))
+    }))).flatMap(domain => ([
+      {
+        name: `Pinata dedicated files (${domain})`,
+        url: (cid: string) => `https://${domain}/files/${encodeURIComponent(cid)}`,
+      },
+      {
+        name: `Pinata dedicated IPFS (${domain})`,
+        url: (cid: string) => `https://${domain}/ipfs/${encodeURIComponent(cid)}`,
+      },
+    ]))
   } catch (error) {
     failures.push(`Pinata gateway discovery: ${error instanceof Error ? error.message : String(error)}`)
     return []
@@ -74,7 +83,7 @@ export async function fetchIpfsContent(cid: string, fetcher: FetchLike = fetch) 
   const failures: string[] = []
   const configured = configuredPinataGateway(cid)
   const gateways = [
-    ...(configured ? [{ name: configured.name, url: () => configured.url }] : []),
+    ...configured,
     ...IPFS_GATEWAYS,
   ]
   try {
