@@ -17,7 +17,7 @@ const fallbackResponse = await fetchIpfsContent("bafytest", (async input => {
 
 assert.equal(fallbackResponse.status, 200)
 assert.equal(await fallbackResponse.text(), "dApp HTML")
-assert.equal(calls.length, 3)
+assert.equal(calls.length, 4)
 
 process.env.PINATA_GATEWAY = "dedicated-example.mypinata.cloud"
 const dedicatedCalls: string[] = []
@@ -32,7 +32,7 @@ const dedicatedResponse = await fetchIpfsContent("bafytest", (async input => {
 
 assert.equal(dedicatedResponse.status, 200)
 assert.equal(await dedicatedResponse.text(), "Pinned dApp HTML")
-assert.equal(dedicatedCalls.length, 4)
+assert.equal(dedicatedCalls.length, 5)
 
 delete process.env.PINATA_GATEWAY
 process.env.PINATA_JWT = "test-pinata-jwt"

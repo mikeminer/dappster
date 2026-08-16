@@ -159,6 +159,23 @@ async function loadCreditBalance() {
   return typeof credits === "number" && Number.isFinite(credits) ? credits : null
 }
 
+async function hasFreeFrontendDeployment(chain: Chain) {
+  const workspace = await apiFetch<{
+    profile?: { plan?: string; plan_expires_at?: string | null }
+    testerTiers?: { solana?: { eligible?: boolean }; evm?: { eligible?: boolean } }
+  }>("/api/me")
+  const profile = workspace.profile
+  const activePro = profile?.plan === "pro"
+    && Boolean(profile.plan_expires_at)
+    && new Date(profile.plan_expires_at!).getTime() > Date.now()
+  const holderBenefit = chain === "solana"
+    ? workspace.testerTiers?.solana?.eligible === true
+    : chain === "evm"
+      ? workspace.testerTiers?.evm?.eligible === true
+      : false
+  return activePro || holderBenefit
+}
+
 type SavedGenerationProject = {
   id: string
   name: string
@@ -590,14 +607,18 @@ export function PromptBuilder() {
 
   async function publishFrontend(currentContract: ContractDeployment) {
     if (!generation) return
-    setDeployStage("burning")
-    const creditBurn = await burnCreditsFromUserWallet(2, "IPFS frontend deployment")
+    const freeDeployment = await hasFreeFrontendDeployment(chain)
+    let creditBurn: CreditBurnProof | null = null
+    if (!freeDeployment) {
+      setDeployStage("burning")
+      creditBurn = await burnCreditsFromUserWallet(2, "IPFS frontend deployment")
+    }
     setDeployStage("pinning")
     const output = await apiFetch<Deployment>("/api/deploy", {
       method: "POST",
       body: JSON.stringify({ dappId: generation.dappId, frontendCode: generation.frontend, chain, contractAddress: currentContract.address, contractTxHash: currentContract.kind === "evm" ? currentContract.txHash : undefined, contractChainId: currentContract.kind === "evm" ? currentContract.chainId : undefined, solanaCluster: currentContract.kind === "solana" ? currentContract.cluster : undefined, creditBurn }),
     })
-    clearPendingCreditBurn(creditBurn)
+    if (creditBurn) clearPendingCreditBurn(creditBurn)
     setDeployment(output)
     setCreditBalance(output.creditsRemaining)
     rememberProject(generation, prompt, chain, currentContract, output)

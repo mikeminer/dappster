@@ -6,6 +6,7 @@ import { compileSolidity } from "@/lib/solidity"
 import { supabaseRequest } from "@/lib/supabase"
 import { hydrateDappSources } from "@/lib/source-storage"
 import { buildSolanaRuntimeCompatibilityScript, inferLegacySolanaIdl, replaceSolanaProgramId, wrapSolanaBabelSource } from "@/lib/solana-frontend"
+import { fetchIpfsContent } from "@/lib/ipfs-gateway"
 
 export const dynamic = "force-dynamic"
 
@@ -35,13 +36,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ cid
   if (!CID_PATTERN.test(cid)) return NextResponse.json({ error: "Invalid IPFS CID" }, { status: 400 })
 
   try {
-    const upstream = await fetch(`https://dweb.link/ipfs/${encodeURIComponent(cid)}`, {
-      cache: "no-store",
-      redirect: "follow",
-    })
-    if (!upstream.ok) {
-      return NextResponse.json({ error: `IPFS content unavailable (${upstream.status})` }, { status: 502 })
-    }
+    const upstream = await fetchIpfsContent(cid)
 
     const contentType = upstream.headers.get("content-type") || "application/octet-stream"
     const headers = new Headers()
