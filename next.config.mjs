@@ -15,11 +15,12 @@ const nextConfig = {
   async headers() {
     const commonSecurityHeaders = [
       { key: "X-Content-Type-Options", value: "nosniff" },
-      { key: "X-Frame-Options", value: "DENY" },
       { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
       { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=()" },
       { key: "Cross-Origin-Opener-Policy", value: "same-origin-allow-popups" },
-      { key: "Cross-Origin-Resource-Policy", value: "same-site" },
+      // CSP frame-ancestors remains the authoritative framing allowlist. CORP
+      // must permit Chrome wallet extensions to display their safety handoff.
+      { key: "Cross-Origin-Resource-Policy", value: "cross-origin" },
       { key: "Origin-Agent-Cluster", value: "?1" },
       { key: "X-DNS-Prefetch-Control", value: "off" },
     ]

@@ -5,7 +5,10 @@ function applicationPolicy() {
     "default-src 'self'",
     "base-uri 'self'",
     "object-src 'none'",
-    "frame-ancestors 'none'",
+    // Wallet safety interstitials render the destination from their installed
+    // Chrome extension. Keep ordinary web framing blocked while allowing that
+    // trusted browser-extension context to display Dappster.
+    "frame-ancestors 'self' chrome-extension:",
     "form-action 'self'",
     // App Router emits inline bootstrap scripts for statically cached pages.
     // A per-request nonce cannot match cached HTML, so it blocks hydration and
@@ -29,7 +32,7 @@ function isolatedBuilderPolicy() {
     "default-src 'self'",
     "base-uri 'self'",
     "object-src 'none'",
-    "frame-ancestors 'none'",
+    "frame-ancestors 'self' chrome-extension:",
     "form-action 'none'",
     "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://dappster.fun https://cdn.tailwindcss.com https://unpkg.com https://cdn.jsdelivr.net",
     "style-src 'self' 'unsafe-inline'",
@@ -48,7 +51,7 @@ function isolatedIpfsPolicy(allowWalletInjection: boolean) {
     `sandbox allow-scripts allow-forms allow-modals allow-popups allow-downloads${allowWalletInjection ? " allow-same-origin" : ""}`,
     "base-uri 'none'",
     "object-src 'none'",
-    "frame-ancestors 'self'",
+    "frame-ancestors 'self' chrome-extension:",
     "form-action 'none'",
     "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://dappster.fun https://cdn.tailwindcss.com https://unpkg.com https://cdn.jsdelivr.net",
     "style-src 'unsafe-inline' https:",
