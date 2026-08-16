@@ -640,11 +640,14 @@ export function PromptBuilder() {
         if (!phantom) throw new Error("Installa o abilita Phantom per autorizzare il deploy Solana")
         const adapter = phantom.adapter as typeof phantom.adapter & {
           signMessage?: (message: Uint8Array) => Promise<Uint8Array>
-          signTransaction?: (transaction: Transaction) => Promise<Transaction>
+          standard?: boolean
         }
         solana.select(adapter.name)
         if (!adapter.connected) await adapter.connect()
-        if (!adapter.publicKey || !adapter.signMessage || !adapter.signTransaction) throw new Error("Phantom cannot sign this Solana deployment")
+        if (!adapter.publicKey || !adapter.signMessage) throw new Error("Phantom cannot sign this Solana deployment")
+        if (targetSolanaCluster === "devnet" && adapter.standard !== true) {
+          throw new Error("Phantom must expose Solana Wallet Standard before Dappster can safely fund a Devnet deployment. Update Phantom, reopen Dappster, and try again. No SOL was sent.")
+        }
         const connection = new Connection(solanaEndpoint, "confirmed")
         const genesisHash = await connection.getGenesisHash()
         if (genesisHash !== SOLANA_GENESIS_HASH[targetSolanaCluster]) {
@@ -694,24 +697,25 @@ export function PromptBuilder() {
             new TransactionInstruction({ programId: new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"), keys: [], data: Buffer.from(quote.memo, "utf8") }),
           )
           setDeployStage("funding")
-          const signedFunding = await adapter.signTransaction(fundingTransaction)
-          if (!signedFunding.signature) throw new Error("Phantom did not sign the SOL funding transaction")
-          fundingSignature = bs58.encode(signedFunding.signature)
+          // Wallet Standard derives the requested chain from this canonical endpoint and
+          // includes it in Phantom's sign/send request. Direct signTransaction() omits the
+          // chain, which makes Phantom simulate a Devnet transfer against Mainnet.
+          const walletClusterConnection = new Connection(clusterApiUrl(targetSolanaCluster), "confirmed")
+          fundingSignature = await adapter.sendTransaction(fundingTransaction, walletClusterConnection, {
+            skipPreflight: false,
+            preflightCommitment: "confirmed",
+            maxRetries: 5,
+          })
+          if (!fundingSignature) throw new Error("Phantom did not submit the SOL funding transaction")
           pendingFunding = { signature: fundingSignature, ...latestBlockhash }
           localStorage.setItem(fundingStorageKey, JSON.stringify(pendingFunding))
-          const rawFunding = signedFunding.serialize()
           const rpcUrls = Array.from(new Set([connection.rpcEndpoint, clusterApiUrl(targetSolanaCluster)]))
-          const broadcastConnections = rpcUrls.map(url => url === connection.rpcEndpoint ? connection : new Connection(url, "confirmed"))
+          const confirmationConnections = rpcUrls.map(url => url === connection.rpcEndpoint ? connection : new Connection(url, "confirmed"))
           setDeployStage("confirming")
           let observed = false
           const broadcastDeadline = Date.now() + 150_000
           while (!observed && Date.now() < broadcastDeadline) {
-            await Promise.allSettled(broadcastConnections.map(rpc => rpc.sendRawTransaction(rawFunding, {
-              skipPreflight: false,
-              preflightCommitment: "confirmed",
-              maxRetries: 5,
-            })))
-            const statusResults = await Promise.allSettled(broadcastConnections.map(rpc =>
+            const statusResults = await Promise.allSettled(confirmationConnections.map(rpc =>
               rpc.getSignatureStatuses([fundingSignature!], { searchTransactionHistory: true })
             ))
             const statuses = statusResults.flatMap(result => result.status === "fulfilled" ? result.value.value : []).filter(Boolean)
@@ -721,7 +725,7 @@ export function PromptBuilder() {
             }
             observed = statuses.length > 0
             if (observed) break
-            const heightResults = await Promise.allSettled(broadcastConnections.map(rpc => rpc.getBlockHeight("confirmed")))
+            const heightResults = await Promise.allSettled(confirmationConnections.map(rpc => rpc.getBlockHeight("confirmed")))
             const heights = heightResults.flatMap(result => result.status === "fulfilled" ? [result.value] : [])
             if (heights.some(height => height > latestBlockhash.lastValidBlockHeight)) {
               localStorage.removeItem(fundingStorageKey)
