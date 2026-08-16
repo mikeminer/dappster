@@ -264,6 +264,38 @@ export function buildSolanaRuntimeCompatibilityScript(solanaIdl?: SolanaIdl) {
           window.PublicKey = PreviewPublicKey;
           try { if (window.solanaWeb3) window.solanaWeb3.PublicKey = PreviewPublicKey; } catch {}
           try { if (window.anchor && window.anchor.web3) window.anchor.web3.PublicKey = PreviewPublicKey; } catch {}
+          const previewPublicKey = new PreviewPublicKey("11111111111111111111111111111111");
+          const unavailable = function () {
+            return Promise.reject(new Error("Wallet signing is disabled in the isolated Dappster preview"));
+          };
+          const previewProvider = {
+            isPhantom: true,
+            isConnected: true,
+            publicKey: previewPublicKey,
+            connect: function () {
+              this.isConnected = true;
+              return Promise.resolve({ publicKey: previewPublicKey });
+            },
+            disconnect: function () {
+              this.isConnected = false;
+              return Promise.resolve();
+            },
+            on: function () { return this; },
+            off: function () { return this; },
+            removeListener: function () { return this; },
+            signTransaction: unavailable,
+            signAllTransactions: unavailable,
+            signAndSendTransaction: unavailable,
+            signMessage: unavailable,
+            request: function (input) {
+              if (input && input.method === "connect") return this.connect();
+              if (input && input.method === "disconnect") return this.disconnect();
+              return unavailable();
+            },
+          };
+          if (!window.phantom) window.phantom = {};
+          if (!window.phantom.solana) window.phantom.solana = previewProvider;
+          if (!window.solana) window.solana = window.phantom.solana;
         }
       });
     })();
