@@ -141,7 +141,7 @@ type PendingSolanaFunding = {
 type ContractDeployment = EvmContractDeployment | SolanaProgramDeployment | SuiPackageDeployment | AptosPackageDeployment
 
 type Deployment = { cid: string; url: string; creditsRemaining: number; status: "live" }
-type DeployStage = "quoting" | "funding" | "queued" | "compiling" | "wallet" | "confirming" | "recording" | "burning" | "pinning" | null
+type DeployStage = "quoting" | "funding-ready" | "funding" | "queued" | "compiling" | "wallet" | "confirming" | "recording" | "burning" | "pinning" | null
 
 type PreparedGeneration = {
   dappId: string
@@ -215,7 +215,8 @@ function rememberProject(generation: Generation, prompt: string, chain: Chain, c
 function stageLabel(stage: DeployStage, chain: Chain, solanaCluster: SolanaDeploymentCluster) {
   const adapter = getChainAdapter(chain)
   if (stage === "quoting") return "Calculating required SOL..."
-  if (stage === "funding") return `Fund the technical wallet on Solana ${solanaCluster === "devnet" ? "Devnet" : "Mainnet"}...`
+  if (stage === "funding-ready") return `Open Phantom · fund the Solana ${solanaCluster === "devnet" ? "Devnet" : "Mainnet"} wallet`
+  if (stage === "funding") return `Confirm ${solanaCluster === "devnet" ? "Devnet" : "Mainnet"} funding in Phantom...`
   if (stage === "queued") return "Deploy queued · waiting for the Solana relayer..."
   if (stage === "compiling") return chain === "solana" ? "Compiling and deploying on Solana..." : chain === "sui" || chain === "aptos" ? `Compiling ${adapter.language} in an isolated sandbox...` : "Compiling Solidity..."
   if (stage === "wallet") return chain === "solana" ? "Authorize deployment in Phantom..." : `Confirm ${adapter.contractNoun.toLowerCase()} deployment in wallet...`
@@ -337,6 +338,7 @@ export function PromptBuilder() {
   const [repairNotice, setRepairNotice] = useState("")
   const generationAbortRef = useRef<AbortController | null>(null)
   const generationRunRef = useRef(0)
+  const solanaFundingApprovalRef = useRef<(() => void) | null>(null)
 
   useEffect(() => () => generationAbortRef.current?.abort(), [])
 
@@ -704,14 +706,15 @@ export function PromptBuilder() {
             const clusterLabel = targetSolanaCluster === "devnet" ? "Devnet" : "Mainnet"
             throw new Error(`Your connected Phantom wallet has ${(selectedClusterBalance / 1_000_000_000).toFixed(6)} SOL on Solana ${clusterLabel}, but this deployment funding requires ${(requiredWithFee / 1_000_000_000).toFixed(6)} SOL including the network fee. No transaction was opened or sent.`)
           }
-          setDeployStage("funding")
           // Wallet Standard derives the explicit chain identifier from this canonical endpoint
           // (solana:devnet or solana:mainnet) and opens Phantom's supported approval flow.
           const walletClusterConnection = new Connection(clusterApiUrl(targetSolanaCluster), "confirmed")
-          const walletClusterGenesis = await walletClusterConnection.getGenesisHash()
-          if (walletClusterGenesis !== SOLANA_GENESIS_HASH[targetSolanaCluster]) {
-            throw new Error(`The canonical Solana wallet endpoint is not ${targetSolanaCluster}. No SOL was sent.`)
-          }
+          // RPC quotation and validation happen before this point, so ask for a second explicit
+          // click before opening Phantom. Browser extensions and mobile deep links can reject a
+          // popup request after the original click's user-activation window has expired.
+          setDeployStage("funding-ready")
+          await new Promise<void>(resolve => { solanaFundingApprovalRef.current = resolve })
+          setDeployStage("funding")
           fundingSignature = await adapter.sendTransaction(fundingTransaction, walletClusterConnection, {
             preflightCommitment: "confirmed",
             maxRetries: 5,
@@ -1079,8 +1082,20 @@ export function PromptBuilder() {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Deployment failed")
     } finally {
+      solanaFundingApprovalRef.current = null
       setDeployStage(null)
     }
+  }
+
+  function startOrResumeDeployment() {
+    if (deployStage === "funding-ready") {
+      const resumeFunding = solanaFundingApprovalRef.current
+      if (!resumeFunding) return
+      solanaFundingApprovalRef.current = null
+      resumeFunding()
+      return
+    }
+    void deploy()
   }
 
   async function recoverDeployment() {
@@ -1180,7 +1195,7 @@ export function PromptBuilder() {
       <section className="panel code-window">
         <div className="panel-head">
           <div className="status-line"><span className="status-dot" /> {loading ? "Generating contract and interface" : generation ? deployment ? `${selectedAdapter.contractNoun} confirmed · frontend live on IPFS` : contractDeployment ? `${selectedAdapter.contractNoun} confirmed · ready for IPFS` : `Generation complete${displayedCredits === null ? "" : ` · ${displayedCredits} credits left`}` : "Generator ready"}</div>
-          {generation && <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}><button className="btn btn-ghost" onClick={() => setPreviewOpen(true)}><Eye size={14} /> Preview</button><button className="btn btn-ghost" onClick={copy}>{copied ? <Check size={14} /> : <Copy size={14} />}{copied ? "Copied" : "Copy"}</button>{deployment ? <a className="btn btn-primary" href={deployment.url} target="_blank" rel="noreferrer">Open dApp <ExternalLink size={14} /></a> : <button className="btn btn-primary" disabled={Boolean(deployStage) || !selectedAdapter.deploymentReady} onClick={deploy}>{deployStage ? <Loader2 className="animate-spin" size={14} /> : <Rocket size={14} />}{stageLabel(deployStage, chain, solanaCluster)}</button>}</div>}
+          {generation && <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}><button className="btn btn-ghost" onClick={() => setPreviewOpen(true)}><Eye size={14} /> Preview</button><button className="btn btn-ghost" onClick={copy}>{copied ? <Check size={14} /> : <Copy size={14} />}{copied ? "Copied" : "Copy"}</button>{deployment ? <a className="btn btn-primary" href={deployment.url} target="_blank" rel="noreferrer">Open dApp <ExternalLink size={14} /></a> : <button className="btn btn-primary" disabled={(Boolean(deployStage) && deployStage !== "funding-ready") || !selectedAdapter.deploymentReady} onClick={startOrResumeDeployment}>{deployStage && deployStage !== "funding-ready" ? <Loader2 className="animate-spin" size={14} /> : <Rocket size={14} />}{stageLabel(deployStage, chain, solanaCluster)}</button>}</div>}
         </div>
         {generation ? <><div className="code-tabs"><button className={`code-tab ${tab === "contract" ? "active" : ""}`} onClick={() => setTab("contract")}>{chain === "evm" ? `${generation.name}.sol` : selectedAdapter.sourceFile}</button><button className={`code-tab ${tab === "frontend" ? "active" : ""}`} onClick={() => setTab("frontend")}>App.tsx</button><button className={`code-tab ${tab === "instructions" ? "active" : ""}`} onClick={() => setTab("instructions")}>Deploy.md</button></div><pre className="code-content">{output}</pre>{generation.warnings?.length > 0 && <div className="warning-list"><strong>Model warnings</strong>{generation.warnings.map(warning => <span key={warning}>• {warning}</span>)}</div>}{contractDeployment && <div className="deploy-result"><div><span className="status"><span className="status-dot" /> {selectedAdapter.contractNoun} confirmed on-chain</span><div className="mono">{contractDeployment.address}</div></div>{contractExplorer && <a href={contractExplorer} target="_blank" rel="noreferrer" className="btn btn-outline">Explorer <ExternalLink size={14} /></a>}</div>}{deployment && <div className="deploy-result"><div><span className="status"><span className="status-dot" /> Frontend live on IPFS</span><div className="mono">{deployment.cid}</div></div><a href={deployment.url} target="_blank" rel="noreferrer" className="btn btn-primary">Open <ExternalLink size={14} /></a></div>}</> : <div className="empty-state"><div><div className="empty-icon"><Sparkles size={24} /></div><strong style={{color:"#abb1b9",fontSize:14}}>Your generated dApp will appear here</strong><p style={{fontSize:12,maxWidth:300,lineHeight:1.6}}>Choose a chain, describe the product, and Dappster will call Grok to generate the contract and interface.</p></div></div>}
       </section>
