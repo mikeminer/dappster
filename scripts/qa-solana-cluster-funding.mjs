@@ -5,18 +5,28 @@ const promptBuilder = await readFile(new URL("../components/PromptBuilder.tsx", 
 
 assert.match(
   promptBuilder,
-  /new Connection\(clusterApiUrl\(targetSolanaCluster\), "confirmed"\)/,
-  "The wallet request must use the canonical endpoint for the selected Solana cluster.",
+  /SOLANA_WALLET_STANDARD_CHAIN[\s\S]*devnet: "solana:devnet"[\s\S]*"mainnet-beta": "solana:mainnet"/,
+  "Wallet Standard requests must use the explicit chain identifier for each cluster.",
 )
 assert.match(
   promptBuilder,
-  /adapter\.sendTransaction\(fundingTransaction, walletClusterConnection/,
-  "Funding must use the cluster-aware Wallet Standard send path.",
+  /feature\.signTransaction\(\{[\s\S]*account,[\s\S]*chain,[\s\S]*transaction:/,
+  "Funding must use Wallet Standard signing with an explicit chain.",
 )
 assert.doesNotMatch(
   promptBuilder,
-  /adapter\.signTransaction\(fundingTransaction\)/,
-  "Direct signing omits the Solana cluster and can make Phantom simulate Devnet funding on Mainnet.",
+  /adapter\.sendTransaction\(fundingTransaction/,
+  "The wallet must not choose or broadcast the funding network.",
+)
+assert.match(
+  promptBuilder,
+  /rpc\.sendRawTransaction\(signedFundingBytes/,
+  "Dappster must broadcast signed funding bytes through the selected-cluster RPC.",
+)
+assert.match(
+  promptBuilder,
+  /connection\.getBalance\(adapter\.publicKey, "confirmed"\)/,
+  "The selected-cluster balance must be checked before opening Phantom.",
 )
 assert.match(
   promptBuilder,
