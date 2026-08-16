@@ -1,7 +1,42 @@
-import { createPublicClient, decodeEventLog, decodeFunctionData, keccak256, parseEther, type Hex } from "viem"
+import { createPublicClient, decodeEventLog, decodeFunctionData, http, keccak256, parseEther, type Chain, type Hex } from "viem"
 import { DAPPSTER_DEPLOYMENT_FEE, DAPPSTER_FEE_EVENT_ABI, DAPPSTER_FEE_RECIPIENT } from "@/lib/deployment-fee"
 import { DAPPSTER_FACTORY_ABI, DAPPSTER_FACTORY_ADDRESS, DAPPSTER_FACTORY_RUNTIME_CODE_HASH } from "@/lib/deployment-factory"
 import { getEvmTransport, getSupportedEvmChain } from "@/lib/evm-chains"
+
+const BYTECODE_VERIFICATION_DELAYS_MS = [0, 500, 1_000, 2_000, 3_500] as const
+
+async function waitForDeployedBytecode(input: {
+  address: `0x${string}`
+  blockNumber: bigint
+  chain: Chain
+}) {
+  const rpcClients = input.chain.rpcUrls.default.http.map(url => createPublicClient({
+    chain: input.chain,
+    transport: http(url, { retryCount: 0, timeout: 4_000 }),
+  }))
+
+  for (const delay of BYTECODE_VERIFICATION_DELAYS_MS) {
+    if (delay > 0) await new Promise(resolve => setTimeout(resolve, delay))
+
+    const results = await Promise.allSettled(rpcClients.map(async client => {
+      try {
+        const codeAtReceipt = await client.getBytecode({
+          address: input.address,
+          blockNumber: input.blockNumber,
+        })
+        if (codeAtReceipt) return codeAtReceipt
+      } catch {
+        // Some public RPCs do not support historical eth_getCode calls.
+      }
+      return client.getBytecode({ address: input.address })
+    }))
+    for (const result of results) {
+      if (result.status === "fulfilled" && result.value) return result.value
+    }
+  }
+
+  return undefined
+}
 
 export async function verifyEvmContractDeployment(input: { address: string; txHash: string; chainId: number }) {
   const chain = getSupportedEvmChain(input.chainId)
@@ -49,7 +84,11 @@ export async function verifyEvmContractDeployment(input: { address: string; txHa
     throw new Error("The verified transaction is not a supported Dappster deployment")
   }
 
-  const deployedCode = await client.getBytecode({ address: input.address as `0x${string}` })
+  const deployedCode = await waitForDeployedBytecode({
+    address: input.address as `0x${string}`,
+    blockNumber: receipt.blockNumber,
+    chain,
+  })
   if (!deployedCode) throw new Error("No deployed contract code was found at the recorded address")
   const validFeeEvent = receipt.logs
     .filter(log => log.address.toLowerCase() === input.address.toLowerCase())
