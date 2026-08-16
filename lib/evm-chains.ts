@@ -37,28 +37,28 @@ function withRpcFallbacks<T extends Chain>(chain: T, urls: readonly string[]) {
 }
 
 export const base = withRpcFallbacks(viemBase, ["https://mainnet.base.org", "https://base-rpc.publicnode.com"])
-export const apeChain = withRpcFallbacks(viemApeChain, ["https://rpc.apechain.com/http"])
-export const mainnet = withRpcFallbacks(viemMainnet, ["https://ethereum-rpc.publicnode.com", "https://cloudflare-eth.com"])
+export const apeChain = withRpcFallbacks(viemApeChain, ["https://rpc.apechain.com/http", "https://apechain.drpc.org"])
+export const mainnet = withRpcFallbacks(viemMainnet, ["https://ethereum-rpc.publicnode.com", "https://eth.drpc.org"])
 export const arbitrum = withRpcFallbacks(viemArbitrum, ["https://arb1.arbitrum.io/rpc", "https://arbitrum-one-rpc.publicnode.com"])
 export const optimism = withRpcFallbacks(viemOptimism, ["https://mainnet.optimism.io", "https://optimism-rpc.publicnode.com"])
 export const linea = withRpcFallbacks(viemLinea, ["https://rpc.linea.build", "https://linea-rpc.publicnode.com"])
-export const sepolia = withRpcFallbacks(viemSepolia, ["https://sepolia.drpc.org", "https://1rpc.io/sepolia", "https://ethereum-sepolia-rpc.publicnode.com"])
+export const sepolia = withRpcFallbacks(viemSepolia, ["https://sepolia.gateway.tenderly.co", "https://ethereum-sepolia-rpc.publicnode.com"])
 export const baseSepolia = withRpcFallbacks(viemBaseSepolia, ["https://sepolia.base.org", "https://base-sepolia-rpc.publicnode.com"])
-export const hyperEvm = withRpcFallbacks(viemHyperEvm, ["https://rpc.hyperliquid.xyz/evm"])
-export const polygon = withRpcFallbacks(viemPolygon, ["https://polygon.drpc.org", "https://polygon-rpc.com", "https://polygon.publicnode.com"])
+export const hyperEvm = withRpcFallbacks(viemHyperEvm, ["https://rpc.hyperliquid.xyz/evm", "https://hyperliquid.drpc.org"])
+export const polygon = withRpcFallbacks(viemPolygon, ["https://polygon.drpc.org", "https://1rpc.io/matic"])
 export const avalanche = withRpcFallbacks(viemAvalanche, ["https://api.avax.network/ext/bc/C/rpc", "https://avalanche-c-chain-rpc.publicnode.com"])
 export const bsc = withRpcFallbacks(viemBsc, ["https://bsc-dataseed.bnbchain.org", "https://bsc-rpc.publicnode.com"])
-export const gnosis = withRpcFallbacks(viemGnosis, ["https://rpc.gnosischain.com", "https://gnosis-rpc.publicnode.com"])
+export const gnosis = withRpcFallbacks(viemGnosis, ["https://rpc.gnosischain.com", "https://rpc.gnosis.gateway.fm"])
 export const celo = withRpcFallbacks(viemCelo, ["https://forno.celo.org", "https://celo-rpc.publicnode.com"])
 export const scroll = withRpcFallbacks(viemScroll, ["https://rpc.scroll.io", "https://scroll-rpc.publicnode.com"])
-export const zksync = withRpcFallbacks(viemZksync, ["https://mainnet.era.zksync.io"])
+export const zksync = withRpcFallbacks(viemZksync, ["https://mainnet.era.zksync.io", "https://zksync.drpc.org"])
 export const mantle = withRpcFallbacks(viemMantle, ["https://rpc.mantle.xyz", "https://mantle-rpc.publicnode.com"])
 export const blast = withRpcFallbacks(viemBlast, ["https://rpc.blast.io", "https://blast-rpc.publicnode.com"])
-export const mode = withRpcFallbacks(viemMode, ["https://mainnet.mode.network"])
-export const berachain = withRpcFallbacks(viemBerachain, ["https://rpc.berachain.com"])
+export const mode = withRpcFallbacks(viemMode, ["https://mainnet.mode.network", "https://1rpc.io/mode"])
+export const berachain = withRpcFallbacks(viemBerachain, ["https://rpc.berachain.com", "https://berachain-rpc.publicnode.com"])
 export const sonic = withRpcFallbacks(viemSonic, ["https://rpc.soniclabs.com", "https://sonic-rpc.publicnode.com"])
-export const fraxtal = withRpcFallbacks(viemFraxtal, ["https://rpc.frax.com"])
-export const metis = withRpcFallbacks(viemMetis, ["https://andromeda.metis.io/?owner=1088", "https://metis-mainnet.public.blastapi.io"])
+export const fraxtal = withRpcFallbacks(viemFraxtal, ["https://rpc.frax.com", "https://fraxtal.gateway.tenderly.co"])
+export const metis = withRpcFallbacks(viemMetis, ["https://andromeda.metis.io/?owner=1088", "https://metis.drpc.org"])
 export const monad = withRpcFallbacks(viemMonad, ["https://rpc.monad.xyz", "https://rpc1.monad.xyz"])
 
 export const robinhood = defineChain({
@@ -66,7 +66,7 @@ export const robinhood = defineChain({
   name: "Robinhood Chain",
   nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
   rpcUrls: {
-    default: { http: ["https://rpc.mainnet.chain.robinhood.com"] },
+    default: { http: ["https://rpc.mainnet.chain.robinhood.com", "https://robinhood-rpc.publicnode.com"] },
   },
   blockExplorers: {
     default: { name: "Robinhood Chain Explorer", url: "https://robinhoodchain.blockscout.com" },
