@@ -24,7 +24,7 @@ const dedicatedCalls: string[] = []
 const dedicatedResponse = await fetchIpfsContent("bafytest", (async input => {
   const url = String(input)
   dedicatedCalls.push(url)
-  if (url === "https://dedicated-example.mypinata.cloud/ipfs/bafytest") {
+  if (url === "https://dedicated-example.mypinata.cloud/files/bafytest") {
     return new Response("Pinned dApp HTML", { status: 200, headers: { "content-type": "text/html" } })
   }
   return new Response("unavailable", { status: 504 })
@@ -32,7 +32,8 @@ const dedicatedResponse = await fetchIpfsContent("bafytest", (async input => {
 
 assert.equal(dedicatedResponse.status, 200)
 assert.equal(await dedicatedResponse.text(), "Pinned dApp HTML")
-assert.equal(dedicatedCalls.length, 5)
+assert.ok(dedicatedCalls.includes("https://dedicated-example.mypinata.cloud/files/bafytest"))
+assert.ok(dedicatedCalls.includes("https://dedicated-example.mypinata.cloud/ipfs/bafytest"))
 
 delete process.env.PINATA_GATEWAY
 process.env.PINATA_JWT = "test-pinata-jwt"
@@ -43,7 +44,7 @@ const discoveredResponse = await fetchIpfsContent("bafytest", (async input => {
   if (url === "https://api.pinata.cloud/v3/gateways") {
     return Response.json({ data: { rows: [{ domain: "discovered-example" }] } })
   }
-  if (url === "https://discovered-example.mypinata.cloud/ipfs/bafytest") {
+  if (url === "https://discovered-example.mypinata.cloud/files/bafytest") {
     return new Response("Discovered dApp HTML", { status: 200, headers: { "content-type": "text/html" } })
   }
   return new Response("unavailable", { status: 504 })
@@ -52,6 +53,7 @@ const discoveredResponse = await fetchIpfsContent("bafytest", (async input => {
 assert.equal(discoveredResponse.status, 200)
 assert.equal(await discoveredResponse.text(), "Discovered dApp HTML")
 assert.ok(discoveredCalls.includes("https://api.pinata.cloud/v3/gateways"))
+assert.ok(discoveredCalls.includes("https://discovered-example.mypinata.cloud/files/bafytest"))
 assert.ok(discoveredCalls.includes("https://discovered-example.mypinata.cloud/ipfs/bafytest"))
 
 delete process.env.PINATA_JWT

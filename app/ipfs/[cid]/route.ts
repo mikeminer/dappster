@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server"
 import type { Abi } from "viem"
 import { injectCompiledAbiIntoFrontend } from "@/lib/frontend-abi"
-import { buildEvmRuntimeCompatibilityScript, rewritePreviewDependencies } from "@/lib/frontend-shell"
+import { buildEvmRuntimeCompatibilityScript, buildHTMLShell, rewritePreviewDependencies } from "@/lib/frontend-shell"
+import { rawCidV1ForText } from "@/lib/ipfs-cid"
 import { compileSolidity } from "@/lib/solidity"
 import { supabaseRequest } from "@/lib/supabase"
 import { hydrateDappSources } from "@/lib/source-storage"
@@ -12,6 +13,17 @@ export const dynamic = "force-dynamic"
 
 const CID_PATTERN = /^(?:Qm[1-9A-HJ-NP-Za-km-z]{44}|b[a-z2-7]{20,})$/
 const runtimeCache = new Map<string, { abi?: Abi; chainId?: number }>()
+
+type StoredFrontendDapp = {
+  name: string
+  frontend_code: string | null
+  contract_code: string | null
+  source_bundle_path: string | null
+  source_bundle_hash: string | null
+  chain: string
+  contract_address: string | null
+  contract_chain_id: number | null
+}
 
 async function compiledRuntimeForCid(cid: string) {
   const cached = runtimeCache.get(cid)
@@ -30,13 +42,47 @@ async function compiledRuntimeForCid(cid: string) {
   return runtime
 }
 
+async function rebuiltFrontendForCid(cid: string) {
+  const rows = await supabaseRequest<StoredFrontendDapp[]>({
+    path: "dapps",
+    query: {
+      ipfs_hash: `eq.${cid}`,
+      select: "name,frontend_code,contract_code,source_bundle_path,source_bundle_hash,chain,contract_address,contract_chain_id",
+      limit: "1",
+    },
+  })
+  const stored = rows[0] ? await hydrateDappSources(rows[0]) : undefined
+  if (!stored?.frontend_code || !stored.contract_address) return null
+
+  const chainId = stored.chain === "evm" ? stored.contract_chain_id || undefined : undefined
+  const abi = stored.chain === "evm" && stored.contract_code
+    ? compileSolidity(stored.contract_code, stored.name, { chainId }).abi
+    : undefined
+  const frontendCode = abi ? injectCompiledAbiIntoFrontend(stored.frontend_code, abi) : stored.frontend_code
+  const html = buildHTMLShell(frontendCode, stored.contract_address, stored.chain, false, abi, chainId)
+
+  if (rawCidV1ForText(html) !== cid) {
+    console.error("[ipfs] stored frontend CID mismatch", { cid })
+    return null
+  }
+  return html
+}
+
 export async function GET(_request: Request, { params }: { params: Promise<{ cid: string }> }) {
   const { cid: rawCid } = await params
   const cid = rawCid.trim()
   if (!CID_PATTERN.test(cid)) return NextResponse.json({ error: "Invalid IPFS CID" }, { status: 400 })
 
   try {
-    const upstream = await fetchIpfsContent(cid)
+    let upstream: Response
+    try {
+      upstream = await fetchIpfsContent(cid)
+    } catch {
+      const rebuiltHtml = await rebuiltFrontendForCid(cid)
+      if (!rebuiltHtml) throw new Error("The IPFS artifact and its verified source fallback are unavailable")
+      console.warn("[ipfs] serving verified source fallback", { cid })
+      upstream = new Response(rebuiltHtml, { headers: { "Content-Type": "text/html; charset=utf-8" } })
+    }
 
     const contentType = upstream.headers.get("content-type") || "application/octet-stream"
     const headers = new Headers()
