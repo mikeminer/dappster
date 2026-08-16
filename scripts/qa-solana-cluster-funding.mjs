@@ -8,10 +8,20 @@ assert.match(
   /new Connection\(clusterApiUrl\(targetSolanaCluster\), "confirmed"\)/,
   "Wallet funding must use the canonical endpoint that Wallet Standard maps to the selected cluster.",
 )
+assert.doesNotMatch(
+  promptBuilder,
+  /walletClusterConnection\.getGenesisHash\(\)/,
+  "The Phantom-opening path must not block on another public RPC request after funding is ready.",
+)
 assert.match(
   promptBuilder,
-  /walletClusterGenesis !== SOLANA_GENESIS_HASH\[targetSolanaCluster\]/,
-  "The canonical wallet endpoint must be verified by genesis hash before Phantom opens.",
+  /setDeployStage\("funding-ready"\)[\s\S]*?new Promise<void>\(resolve => \{ solanaFundingApprovalRef\.current = resolve \}\)[\s\S]*?adapter\.sendTransaction\(fundingTransaction, walletClusterConnection/,
+  "Funding must wait for a fresh explicit user click before opening Phantom.",
+)
+assert.match(
+  promptBuilder,
+  /deployStage !== "funding-ready"/,
+  "The funding-ready action must remain enabled so the user can explicitly open Phantom.",
 )
 assert.match(
   promptBuilder,
