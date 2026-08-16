@@ -16,6 +16,7 @@
     "qa:solidity-targets": "node --no-warnings --experimental-strip-types scripts/qa-solidity-targets.mts",
     "qa:evm-wallets": "node scripts/qa-evm-wallet-requests.mjs",
     "qa:evm-factory": "node scripts/verify-deployment-factory.mjs",
+    "qa:solana-cluster": "node scripts/qa-solana-cluster-funding.mjs",
     "qa:solana-frontend": "node --no-warnings --experimental-strip-types scripts/qa-solana-frontend-runtime.mts",
     "qa:preview-runtime": "node scripts/qa-preview-runtime.mjs"
   },
