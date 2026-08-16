@@ -15,6 +15,11 @@ assert.match(
 )
 assert.match(
   promptBuilder,
+  /setDeployStage\("authorization-ready"\)[\s\S]*?new Promise<void>\(resolve => \{ solanaAuthorizationApprovalRef\.current = resolve \}\)[\s\S]*?adapter\.signMessage\(message\)/,
+  "Deployment authorization must wait for a fresh explicit user click before opening Phantom.",
+)
+assert.match(
+  promptBuilder,
   /async function signSolanaFundingWithPhantom[\s\S]*adapter\.standard !== true[\s\S]*account\?\.chains\.includes\(expectedChain\)/,
   "Funding must require a Wallet Standard account that advertises the selected chain.",
 )
@@ -26,8 +31,8 @@ assert.match(
 )
 assert.match(
   promptBuilder,
-  /deployStage !== "funding-ready"/,
-  "The funding-ready action must remain enabled so the user can explicitly open Phantom.",
+  /deployStage !== "funding-ready" && deployStage !== "authorization-ready"/,
+  "Both explicit Phantom actions must remain enabled for a fresh user gesture.",
 )
 assert.match(
   promptBuilder,
