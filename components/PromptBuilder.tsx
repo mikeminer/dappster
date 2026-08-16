@@ -58,6 +58,31 @@ type ClusterAwareSolanaAdapter = {
   }
 }
 
+async function switchPhantomToSolanaCluster(
+  cluster: SolanaDeploymentCluster,
+  expectedWalletAddress: string,
+) {
+  const [{ createPhantom }, { createSolanaPlugin }] = await Promise.all([
+    import("@phantom/browser-injected-sdk"),
+    import("@phantom/browser-injected-sdk/solana"),
+  ])
+  const phantom = createPhantom({ plugins: [createSolanaPlugin()] })
+  let connected: { publicKey: string }
+  try {
+    connected = await phantom.solana.connect({ onlyIfTrusted: true })
+  } catch {
+    connected = await phantom.solana.connect()
+  }
+  const connectedAddress = connected.publicKey || phantom.solana.publicKey
+  if (connectedAddress !== expectedWalletAddress) {
+    throw new Error(`Phantom connected ${connectedAddress || "a different account"}, but Dappster expects ${expectedWalletAddress}. Select the linked wallet and try again. No SOL was sent.`)
+  }
+  await phantom.solana.switchNetwork(cluster === "devnet" ? "devnet" : "mainnet")
+  if (phantom.solana.publicKey && phantom.solana.publicKey !== expectedWalletAddress) {
+    throw new Error(`Phantom switched to account ${phantom.solana.publicKey}, but Dappster expects ${expectedWalletAddress}. No SOL was sent.`)
+  }
+}
+
 async function signSolanaFundingForCluster(
   adapter: ClusterAwareSolanaAdapter,
   walletAddress: string,
@@ -767,6 +792,10 @@ export function PromptBuilder() {
           setDeployStage("funding-ready")
           await new Promise<void>(resolve => { solanaFundingApprovalRef.current = resolve })
           setDeployStage("funding")
+          // Keep Phantom's own network state aligned with the cluster that was already
+          // verified by genesis hash. This prevents Phantom from presenting a Devnet
+          // funding request with its Mainnet account state or simulation context.
+          await switchPhantomToSolanaCluster(targetSolanaCluster, adapter.publicKey.toBase58())
           // Phantom signs an explicitly cluster-bound request, but never chooses the RPC used to
           // broadcast it. Dappster submits the signed bytes only to the selected, verified cluster.
           const signedFundingBytes = await signSolanaFundingForCluster(adapter, adapter.publicKey.toBase58(), fundingTransaction, targetSolanaCluster)

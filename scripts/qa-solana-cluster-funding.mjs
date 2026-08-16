@@ -15,8 +15,13 @@ assert.doesNotMatch(
 )
 assert.match(
   promptBuilder,
-  /setDeployStage\("funding-ready"\)[\s\S]*?new Promise<void>\(resolve => \{ solanaFundingApprovalRef\.current = resolve \}\)[\s\S]*?signSolanaFundingForCluster\(/,
+  /setDeployStage\("funding-ready"\)[\s\S]*?new Promise<void>\(resolve => \{ solanaFundingApprovalRef\.current = resolve \}\)[\s\S]*?switchPhantomToSolanaCluster\(targetSolanaCluster,[\s\S]*?signSolanaFundingForCluster\(/,
   "Funding must wait for a fresh explicit user click before opening Phantom.",
+)
+assert.match(
+  promptBuilder,
+  /phantom\.solana\.switchNetwork\(cluster === "devnet" \? "devnet" : "mainnet"\)/,
+  "Phantom itself must switch to the selected Solana cluster before signing.",
 )
 assert.match(
   promptBuilder,
