@@ -1,9 +1,37 @@
 import { createPublicClient, decodeEventLog, decodeFunctionData, http, keccak256, parseEther, type Chain, type Hex } from "viem"
 import { DAPPSTER_DEPLOYMENT_FEE, DAPPSTER_FEE_EVENT_ABI, DAPPSTER_FEE_RECIPIENT } from "@/lib/deployment-fee"
 import { DAPPSTER_FACTORY_ABI, DAPPSTER_FACTORY_ADDRESS, DAPPSTER_FACTORY_RUNTIME_CODE_HASH } from "@/lib/deployment-factory"
-import { getEvmTransport, getSupportedEvmChain } from "@/lib/evm-chains"
+import { getSupportedEvmChain } from "@/lib/evm-chains"
 
 const BYTECODE_VERIFICATION_DELAYS_MS = [0, 500, 1_000, 2_000, 3_500] as const
+const TRANSACTION_VERIFICATION_DELAYS_MS = [0, 500, 1_000, 2_000, 3_500] as const
+
+async function waitForDeploymentTransaction(input: {
+  chain: Chain
+  hash: `0x${string}`
+}) {
+  const rpcClients = input.chain.rpcUrls.default.http.map(url => createPublicClient({
+    chain: input.chain,
+    transport: http(url, { retryCount: 0, timeout: 4_000 }),
+  }))
+
+  for (const delay of TRANSACTION_VERIFICATION_DELAYS_MS) {
+    if (delay > 0) await new Promise(resolve => setTimeout(resolve, delay))
+
+    const results = await Promise.allSettled(rpcClients.map(async client => {
+      const [receipt, transaction] = await Promise.all([
+        client.getTransactionReceipt({ hash: input.hash }),
+        client.getTransaction({ hash: input.hash }),
+      ])
+      return { client, receipt, transaction }
+    }))
+    for (const result of results) {
+      if (result.status === "fulfilled") return result.value
+    }
+  }
+
+  throw new Error(`The deployment transaction ${input.hash} is not indexed yet on ${input.chain.name}. Wait a few seconds and retry; no new deployment is required.`)
+}
 
 async function waitForDeployedBytecode(input: {
   address: `0x${string}`
@@ -41,12 +69,8 @@ async function waitForDeployedBytecode(input: {
 export async function verifyEvmContractDeployment(input: { address: string; txHash: string; chainId: number }) {
   const chain = getSupportedEvmChain(input.chainId)
   if (!chain) throw new Error("Unsupported EVM deployment network")
-  const client = createPublicClient({ chain, transport: getEvmTransport(chain) })
   const hash = input.txHash as `0x${string}`
-  const [receipt, transaction] = await Promise.all([
-    client.getTransactionReceipt({ hash }),
-    client.getTransaction({ hash }),
-  ])
+  const { client, receipt, transaction } = await waitForDeploymentTransaction({ chain, hash })
   if (receipt.status !== "success") throw new Error("The contract deployment receipt could not be verified")
   if (transaction.value !== parseEther(DAPPSTER_DEPLOYMENT_FEE)) throw new Error(`Contract deployment must send exactly ${DAPPSTER_DEPLOYMENT_FEE} ${chain.nativeCurrency.symbol}`)
 
