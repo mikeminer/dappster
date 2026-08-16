@@ -93,7 +93,19 @@ function buildPreviewDiagnosticsScript(chain: string) {
           retry.type = "button";
           retry.textContent = "Retry preview";
           retry.addEventListener("click", () => window.location.reload());
-          panel.append(eyebrow, title, detail, hint, retry);
+          const regenerate = document.createElement("button");
+          regenerate.type = "button";
+          regenerate.className = "preview-error-secondary";
+          regenerate.textContent = "Regenerate frontend";
+          regenerate.addEventListener("click", () => {
+            regenerate.disabled = true;
+            regenerate.textContent = "Regenerating frontend…";
+            notifyParent("regenerate", message);
+          });
+          const actions = document.createElement("div");
+          actions.className = "preview-error-actions";
+          actions.append(retry, regenerate);
+          panel.append(eyebrow, title, detail, hint, actions);
           container.append(panel);
         }
         notifyParent("error", message);
@@ -119,6 +131,36 @@ function buildPreviewDiagnosticsScript(chain: string) {
           showError("The generated frontend did not render within 20 seconds.");
         }
       }, 20000);
+    })();
+  `
+}
+
+function buildBrowserModuleResolverScript(chain: string) {
+  const solanaModules = chain === "solana"
+    ? `
+      "@solana/web3.js": () => window.solanaWeb3 || window.__DAPPSTER_SOLANA_RUNTIME__?.web3,
+      "@coral-xyz/anchor": () => window.anchor || window.__DAPPSTER_SOLANA_RUNTIME__?.anchor,
+      "@project-serum/anchor": () => window.anchor || window.__DAPPSTER_SOLANA_RUNTIME__?.anchor,
+      "@solana/spl-token": () => window.splToken || window.__DAPPSTER_SOLANA_RUNTIME__?.splToken,
+      "@solana/wallet-adapter-phantom": () => window.phantomWalletAdapter || window.__DAPPSTER_SOLANA_RUNTIME__?.phantomWalletAdapter,
+      "buffer": () => ({ Buffer: window.Buffer || window.__DAPPSTER_SOLANA_RUNTIME__?.Buffer }),`
+    : ""
+  return `
+    (function () {
+      const modules = {
+        "react": () => window.React,
+        "react-dom": () => window.ReactDOM,
+        "react-dom/client": () => window.ReactDOM,
+        "ethers": () => window.ethers,
+        ${solanaModules}
+      };
+      window.require = function require(moduleName) {
+        const load = modules[moduleName];
+        if (!load) throw new Error("Unsupported browser dependency: " + moduleName + ". Regenerate the frontend without this package.");
+        const moduleValue = load();
+        if (!moduleValue) throw new Error("Browser dependency failed to load: " + moduleName);
+        return moduleValue;
+      };
     })();
   `
 }
@@ -313,6 +355,7 @@ export function buildHTMLShell(frontendCode: string, contractAddress: string, ch
   const evmCompatibility = buildEvmRuntimeCompatibilityScript(contractAbi, chain === "evm" ? evmChainId : undefined)
   const solanaCompatibility = buildSolanaRuntimeCompatibilityScript(solanaIdl)
   const previewDiagnostics = preview ? buildPreviewDiagnosticsScript(chain) : ""
+  const browserModuleResolver = buildBrowserModuleResolverScript(chain)
   const previewReady = preview
     ? `requestAnimationFrame(() => requestAnimationFrame(() => window.__DAPPSTER_PREVIEW__?.ready()));`
     : ""
@@ -338,7 +381,10 @@ export function buildHTMLShell(frontendCode: string, contractAddress: string, ch
     .preview-error h1{margin:0;font-size:clamp(28px,6vw,52px);line-height:1.02}
     .preview-error pre{overflow:auto;margin:0;padding:16px;border:1px solid #3f3f46;border-radius:12px;background:#111216;color:#fda4af;white-space:pre-wrap;word-break:break-word;font:13px/1.5 monospace}
     .preview-error p{margin:0;color:#a1a1aa;line-height:1.55}
-    .preview-error button{align-self:flex-start;padding:11px 16px;border:0;border-radius:9px;background:#c7ff32;color:#080a08;font-weight:800;cursor:pointer}
+    .preview-error-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+    .preview-error button{padding:11px 16px;border:1px solid #c7ff32;border-radius:9px;background:#c7ff32;color:#080a08;font-weight:800;cursor:pointer}
+    .preview-error button.preview-error-secondary{background:transparent;color:#c7ff32}
+    .preview-error button:disabled{cursor:wait;opacity:.65}
     #dappster-built-with{
       position:fixed!important;
       right:16px!important;
@@ -386,6 +432,7 @@ export function buildHTMLShell(frontendCode: string, contractAddress: string, ch
     ${evmCompatibility}
     ${solanaCompatibility}
     if (window.solanaWeb3) Object.assign(window, window.solanaWeb3);
+    ${browserModuleResolver}
   </script>
   <script type="text/babel" data-presets="env,react,typescript" data-filename="App.tsx">
     ${chain === "solana" ? wrapSolanaBabelSource(`

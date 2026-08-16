@@ -26,6 +26,7 @@ const compilerRepairPrompts: Partial<Record<Chain, string>> = {
   sui: `You repair Sui Move compiler errors. Preserve product behavior, modules, objects, capabilities, entry functions, events, access control, and public interfaces. Preserve the exact ===== FILE: path ===== source-bundle format and return every required file including Move.toml. Make only changes required by sui move build. Return only strict JSON with one field named contract containing the complete repaired source bundle.`,
   aptos: `You repair Aptos Move compiler errors. Preserve product behavior, modules, resources or objects, entry functions, events, signer checks, access control, and public interfaces. Preserve the exact ===== FILE: path ===== source-bundle format, the dappster_package named address, and every required file including Move.toml. Make only changes required by aptos move build-publish-payload. Return only strict JSON with one field named contract containing the complete repaired source bundle.`,
 }
+const frontendRepairPrompt = `You repair a generated Dappster React frontend without changing its smart contract. Return only strict JSON with one field named frontend containing one complete self-contained React component. Preserve the requested product behavior and every contract interaction. The source must run directly in a browser through Babel standalone: use ES module imports only, never CommonJS require(), never import local files, and never depend on a bundler. Read the deployed address from window.__DAPPSTER__.contractAddress. For EVM use ethers v6 and window.__DAPPSTER__.decodeError(error). For Solana connect directly through window.phantom?.solana or window.solana, use @solana/web3.js and @coral-xyz/anchor, read window.__DAPPSTER__.solanaIdl, and do not use React wallet-adapter providers, WalletMultiButton, or PhantomWalletAdapter.`
 
 function parseJson<T>(value: string): T {
   const cleaned = value.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "")
@@ -82,6 +83,31 @@ export async function repairGeneratedContract(chain: Extract<Chain, "solana" | "
   const repaired = parseJson<{ contract?: string }>(output).contract?.trim()
   if (!repaired) throw new Error("AI provider returned an invalid compiler repair")
   return repaired.replace(/^```(?:rust|move)?\s*/i, "").replace(/\s*```$/, "")
+}
+
+export async function repairGeneratedFrontend(input: {
+  chain: Chain
+  productPrompt: string
+  contractSource: string
+  frontendSource: string
+  previewError: string
+  signal?: AbortSignal
+}) {
+  const output = await callXAI(frontendRepairPrompt, [
+    `Target ecosystem: ${getChainAdapter(input.chain).name}`,
+    `Original product request:\n${input.productPrompt.slice(0, 4000)}`,
+    `Preview error to fix:\n${input.previewError.slice(0, 4000)}`,
+    `Smart-contract source (do not modify):\n${input.contractSource.slice(0, 100000)}`,
+    `Current frontend source:\n${input.frontendSource.slice(0, 60000)}`,
+  ].join("\n\n"), "repair", input.signal)
+  if (!output) throw new Error("AI provider returned an empty frontend repair response")
+  const frontend = parseJson<{ frontend?: string }>(output).frontend?.trim()
+    .replace(/^```(?:tsx|typescript|jsx)?\s*/i, "")
+    .replace(/\s*```$/, "")
+  if (!frontend || frontend.length < 80 || !/export\s+default/.test(frontend)) {
+    throw new Error("AI provider returned an invalid frontend repair")
+  }
+  return frontend
 }
 
 export async function callAI(task: "generate", prompt: string, chain: Chain, options?: GenerationOptions): Promise<Generation>
