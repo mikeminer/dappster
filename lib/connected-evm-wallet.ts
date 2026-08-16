@@ -7,11 +7,66 @@ import { reownAppKit } from "@/lib/reown"
 
 type Eip1193Provider = {
   request(args: { method: string; params?: unknown[] | object }): Promise<unknown>
+  providers?: Eip1193Provider[]
+}
+
+export class LinkedEvmAccountMismatchError extends Error {
+  constructor() {
+    super("Connect your linked EVM wallet to continue")
+    this.name = "LinkedEvmAccountMismatchError"
+  }
+}
+
+function normalizeEvmAddress(address: string | undefined) {
+  return address?.trim().replace(/^web3:ethereum:/i, "").toLowerCase() || ""
 }
 
 function isExpectedAddress(address: string | undefined, expectedAddresses: readonly string[]) {
   if (!address || !expectedAddresses.length) return Boolean(address)
-  return expectedAddresses.some(expected => expected.toLowerCase() === address.toLowerCase())
+  const normalizedAddress = normalizeEvmAddress(address)
+  return expectedAddresses.some(expected => normalizeEvmAddress(expected) === normalizedAddress)
+}
+
+function providerErrorCode(error: unknown) {
+  const value = error as { code?: unknown; data?: { originalError?: { code?: unknown } } } | undefined
+  return Number(value?.code ?? value?.data?.originalError?.code)
+}
+
+async function ensureProviderChain(provider: Eip1193Provider, chain: Chain) {
+  const chainIdHex = `0x${chain.id.toString(16)}`
+  const currentChainId = await provider.request({ method: "eth_chainId" }).catch(() => undefined)
+  if (typeof currentChainId === "string" && currentChainId.toLowerCase() === chainIdHex.toLowerCase()) return
+  try {
+    await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: chainIdHex }] })
+  } catch (error) {
+    if (providerErrorCode(error) !== 4902) throw error
+    await provider.request({
+      method: "wallet_addEthereumChain",
+      params: [{
+        chainId: chainIdHex,
+        chainName: chain.name,
+        nativeCurrency: chain.nativeCurrency,
+        rpcUrls: [...chain.rpcUrls.default.http],
+        blockExplorerUrls: chain.blockExplorers?.default?.url ? [chain.blockExplorers.default.url] : [],
+      }],
+    })
+    await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: chainIdHex }] })
+  }
+  const confirmedChainId = await provider.request({ method: "eth_chainId" })
+  if (typeof confirmedChainId !== "string" || confirmedChainId.toLowerCase() !== chainIdHex.toLowerCase()) {
+    throw new Error(`Your wallet did not switch to ${chain.name}`)
+  }
+}
+
+function addProviderCandidate(
+  candidates: Array<{ id: "walletConnect" | "injected"; provider: Eip1193Provider }>,
+  seen: Set<Eip1193Provider>,
+  id: "walletConnect" | "injected",
+  provider: Eip1193Provider | undefined,
+) {
+  if (!provider?.request || seen.has(provider)) return
+  seen.add(provider)
+  candidates.push({ id, provider })
 }
 
 async function activeAccount(expectedAddresses: readonly string[] = []) {
@@ -64,14 +119,24 @@ async function activeAccount(expectedAddresses: readonly string[] = []) {
     if (connectionAccount) return connectionAccount
     await new Promise(resolve => setTimeout(resolve, 100))
   }
-  throw new Error("Connect your linked EVM wallet to continue")
+  if (expectedAddresses.length) throw new LinkedEvmAccountMismatchError()
+  throw new Error("Connect your EVM wallet to continue")
 }
 
 export async function getConnectedEvmWallet(chain: Chain, expectedAddresses: readonly string[] = []) {
   try {
     const account = await activeAccount(expectedAddresses)
-    if (account.chainId !== chain.id) await switchChain(wagmiConfig, { chainId: chain.id as never })
-    const provider = await account.connector.getProvider()
+    const provider = await account.connector.getProvider() as Eip1193Provider
+    if (account.chainId !== chain.id) {
+      try {
+        await switchChain(wagmiConfig, { chainId: chain.id as never })
+      } catch {
+        // AppKit and WalletConnect can expose the authorized provider before
+        // Wagmi restores its active chain. Switch through EIP-1193 in that case.
+        await ensureProviderChain(provider, chain)
+      }
+    }
+    await ensureProviderChain(provider, chain)
     const wallet = createWalletClient({ chain, transport: custom(provider as never) })
     return {
       address: account.address,
@@ -80,34 +145,22 @@ export async function getConnectedEvmWallet(chain: Chain, expectedAddresses: rea
       wallet,
     }
   } catch (wagmiError) {
-    const candidates: Array<{ id: "walletConnect" | "injected"; provider: Eip1193Provider | undefined }> = [
-      {
-        id: "walletConnect",
-        provider: reownAppKit?.getAccount("eip155")?.isConnected
-          ? reownAppKit.getWalletProvider() as Eip1193Provider | undefined
-          : undefined,
-      },
-      {
-        id: "injected",
-        provider: (window as Window & { ethereum?: Eip1193Provider }).ethereum,
-      },
-    ]
+    const candidates: Array<{ id: "walletConnect" | "injected"; provider: Eip1193Provider }> = []
+    const seen = new Set<Eip1193Provider>()
+    const reownProvider = reownAppKit?.getWalletProvider() as Eip1193Provider | undefined
+    addProviderCandidate(candidates, seen, "walletConnect", reownProvider)
+    const injected = (window as Window & { ethereum?: Eip1193Provider }).ethereum
+    for (const provider of injected?.providers || []) addProviderCandidate(candidates, seen, "injected", provider)
+    addProviderCandidate(candidates, seen, "injected", injected)
+
     for (const candidate of candidates) {
-      if (!candidate.provider?.request) continue
       const accountsValue = await candidate.provider.request({ method: "eth_accounts" }).catch(() => [])
       const accounts = Array.isArray(accountsValue)
         ? accountsValue.filter((value): value is `0x${string}` => typeof value === "string" && /^0x[0-9a-fA-F]{40}$/.test(value))
         : []
       const address = accounts.find(value => isExpectedAddress(value, expectedAddresses))
       if (!address) continue
-      const chainIdValue = await candidate.provider.request({ method: "eth_chainId" }).catch(() => undefined)
-      const activeChainId = typeof chainIdValue === "string" ? Number.parseInt(chainIdValue, 16) : undefined
-      if (activeChainId !== chain.id) {
-        await candidate.provider.request({
-          method: "wallet_switchEthereumChain",
-          params: [{ chainId: `0x${chain.id.toString(16)}` }],
-        })
-      }
+      await ensureProviderChain(candidate.provider, chain)
       return {
         address,
         connector: { id: candidate.id },

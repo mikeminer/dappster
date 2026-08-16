@@ -13,7 +13,7 @@ import { useWallet as useAptosWallet } from "@aptos-labs/wallet-adapter-react"
 import { Network } from "@aptos-labs/ts-sdk"
 import { apiFetch } from "@/lib/client-api"
 import { burnCreditsFromUserWallet, clearPendingCreditBurn, type CreditBurnProof } from "@/lib/client-credit-burn"
-import { getConnectedEvmWallet } from "@/lib/connected-evm-wallet"
+import { getConnectedEvmWallet, LinkedEvmAccountMismatchError } from "@/lib/connected-evm-wallet"
 import { DAPPSTER_DEPLOYMENT_FEE, DAPPSTER_FEE_RECIPIENT } from "@/lib/deployment-fee"
 import { DAPPSTER_FACTORY_ABI, DAPPSTER_FACTORY_ADDRESS, DAPPSTER_FACTORY_RUNTIME_CODE_HASH, getFactoryBootstrapData, SAFE_SINGLETON_FACTORY } from "@/lib/deployment-factory"
 import { blast, DEFAULT_EVM_CHAIN_ID, EVM_EXPLORERS, fraxtal, getEvmTransport, getSupportedEvmChain, linea, mode, optimism, robinhood, SUPPORTED_EVM_CHAINS } from "@/lib/evm-chains"
@@ -897,7 +897,7 @@ export function PromptBuilder() {
       try {
         connectedWallet = await getConnectedEvmWallet(selectedChain, linkedEvmAddresses)
       } catch (walletError) {
-        if (linkedEvmAddresses.length) {
+        if (linkedEvmAddresses.length && walletError instanceof LinkedEvmAccountMismatchError) {
           const linked = linkedEvmAddresses.map(address => `${address.slice(0, 6)}…${address.slice(-4)}`).join(", ")
           throw new Error(`Select your linked EVM account ${linked} in your wallet, then try again. Dappster will not deploy from an unlinked account.`)
         }
