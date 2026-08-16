@@ -30,60 +30,6 @@ const SOLANA_GENESIS_HASH: Record<SolanaDeploymentCluster, string> = {
   "mainnet-beta": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
 }
 
-const SOLANA_WALLET_STANDARD_CHAIN: Record<SolanaDeploymentCluster, string> = {
-  devnet: "solana:devnet",
-  "mainnet-beta": "solana:mainnet",
-}
-
-type SolanaWalletStandardAccount = {
-  address: string
-  chains: readonly string[]
-  features: readonly string[]
-}
-
-type SolanaWalletStandardSignTransaction = {
-  signTransaction: (...inputs: readonly {
-    account: SolanaWalletStandardAccount
-    transaction: Uint8Array
-    chain?: string
-    options?: { preflightCommitment?: "confirmed" }
-  }[]) => Promise<readonly { signedTransaction: Uint8Array }[]>
-}
-
-type ClusterAwareSolanaAdapter = {
-  standard?: boolean
-  wallet?: {
-    accounts: readonly SolanaWalletStandardAccount[]
-    features: Record<string, unknown>
-  }
-}
-
-async function signSolanaFundingForCluster(
-  adapter: ClusterAwareSolanaAdapter,
-  walletAddress: string,
-  transaction: Transaction,
-  cluster: SolanaDeploymentCluster,
-) {
-  const chain = SOLANA_WALLET_STANDARD_CHAIN[cluster]
-  const wallet = adapter.wallet
-  const account = wallet?.accounts.find(candidate => candidate.address === walletAddress)
-  const feature = wallet?.features["solana:signTransaction"] as SolanaWalletStandardSignTransaction | undefined
-  if (adapter.standard !== true || !account || !feature || !account.features.includes("solana:signTransaction")) {
-    throw new Error(`Phantom cannot sign a cluster-bound ${cluster === "devnet" ? "Devnet" : "Mainnet"} transaction. Update Phantom and reconnect. No SOL was sent.`)
-  }
-  if (!account.chains.includes(chain)) {
-    throw new Error(`The connected Phantom account does not advertise ${chain}. Enable ${cluster === "devnet" ? "Devnet/Testnet mode" : "Mainnet"} in Phantom and reconnect. No SOL was sent.`)
-  }
-  const [output] = await feature.signTransaction({
-    account,
-    chain,
-    transaction: new Uint8Array(transaction.serialize({ requireAllSignatures: false, verifySignatures: false })),
-    options: { preflightCommitment: "confirmed" },
-  })
-  if (!output?.signedTransaction?.length) throw new Error("Phantom did not return a signed SOL funding transaction")
-  return output.signedTransaction
-}
-
 type Generation = {
   dappId: string
   name: string
@@ -696,7 +642,6 @@ export function PromptBuilder() {
         const adapter = phantom.adapter as typeof phantom.adapter & {
           signMessage?: (message: Uint8Array) => Promise<Uint8Array>
           standard?: boolean
-          wallet?: ClusterAwareSolanaAdapter["wallet"]
         }
         solana.select(adapter.name)
         if (!adapter.connected) await adapter.connect()
@@ -760,26 +705,21 @@ export function PromptBuilder() {
             throw new Error(`Your connected Phantom wallet has ${(selectedClusterBalance / 1_000_000_000).toFixed(6)} SOL on Solana ${clusterLabel}, but this deployment funding requires ${(requiredWithFee / 1_000_000_000).toFixed(6)} SOL including the network fee. No transaction was opened or sent.`)
           }
           setDeployStage("funding")
-          // Request a cluster-bound signature without letting the wallet choose or broadcast
-          // the network. Dappster submits the signed bytes only to RPCs for the verified cluster.
-          const signedFundingBytes = await signSolanaFundingForCluster(adapter, adapter.publicKey.toBase58(), fundingTransaction, targetSolanaCluster)
-          const signedFunding = Transaction.from(signedFundingBytes)
-          if (!signedFunding.signature) throw new Error("Phantom did not sign the SOL funding transaction")
-          fundingSignature = bs58.encode(signedFunding.signature)
-          pendingFunding = { signature: fundingSignature, ...latestBlockhash }
-          localStorage.setItem(fundingStorageKey, JSON.stringify(pendingFunding))
-          const rpcUrls = Array.from(new Set([connection.rpcEndpoint, clusterApiUrl(targetSolanaCluster)]))
-          const confirmationConnections = rpcUrls.map(url => url === connection.rpcEndpoint ? connection : new Connection(url, "confirmed"))
-          const broadcasts = await Promise.allSettled(confirmationConnections.map(rpc => rpc.sendRawTransaction(signedFundingBytes, {
-            skipPreflight: false,
+          // Wallet Standard derives the explicit chain identifier from this canonical endpoint
+          // (solana:devnet or solana:mainnet) and opens Phantom's supported approval flow.
+          const walletClusterConnection = new Connection(clusterApiUrl(targetSolanaCluster), "confirmed")
+          const walletClusterGenesis = await walletClusterConnection.getGenesisHash()
+          if (walletClusterGenesis !== SOLANA_GENESIS_HASH[targetSolanaCluster]) {
+            throw new Error(`The canonical Solana wallet endpoint is not ${targetSolanaCluster}. No SOL was sent.`)
+          }
+          fundingSignature = await adapter.sendTransaction(fundingTransaction, walletClusterConnection, {
             preflightCommitment: "confirmed",
             maxRetries: 5,
-          })))
-          if (!broadcasts.some(result => result.status === "fulfilled" && result.value === fundingSignature)) {
-            localStorage.removeItem(fundingStorageKey)
-            const reason = broadcasts.find(result => result.status === "rejected")
-            throw new Error(`Solana ${targetSolanaCluster === "devnet" ? "Devnet" : "Mainnet"} RPC rejected the signed funding transaction${reason?.status === "rejected" && reason.reason instanceof Error ? `: ${reason.reason.message}` : "."}`)
-          }
+          })
+          pendingFunding = { signature: fundingSignature, ...latestBlockhash }
+          localStorage.setItem(fundingStorageKey, JSON.stringify(pendingFunding))
+          const rpcUrls = Array.from(new Set([connection.rpcEndpoint, walletClusterConnection.rpcEndpoint]))
+          const confirmationConnections = rpcUrls.map(url => url === connection.rpcEndpoint ? connection : new Connection(url, "confirmed"))
           setDeployStage("confirming")
           let observed = false
           const broadcastDeadline = Date.now() + 150_000
