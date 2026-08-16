@@ -7,7 +7,8 @@ function base32Encode(bytes: Uint8Array) {
   let buffer = 0
   let bits = 0
 
-  for (const byte of bytes) {
+  for (let index = 0; index < bytes.length; index += 1) {
+    const byte = bytes[index]
     buffer = (buffer << 8) | byte
     bits += 8
     while (bits >= 5) {
