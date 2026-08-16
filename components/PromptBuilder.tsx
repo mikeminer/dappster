@@ -30,42 +30,59 @@ const SOLANA_GENESIS_HASH: Record<SolanaDeploymentCluster, string> = {
   "mainnet-beta": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
 }
 
+const SOLANA_WALLET_STANDARD_CHAIN: Record<SolanaDeploymentCluster, "solana:devnet" | "solana:mainnet"> = {
+  devnet: "solana:devnet",
+  "mainnet-beta": "solana:mainnet",
+}
+
+type ClusterAwarePhantomAdapter = {
+  standard?: boolean
+  connected: boolean
+  publicKey: PublicKey | null
+  name: string
+  wallet?: {
+    accounts: ReadonlyArray<{
+      address: string
+      chains: readonly string[]
+    }>
+  }
+  connect: () => Promise<void>
+  sendTransaction: (
+    transaction: Transaction,
+    connection: Connection,
+    options?: { preflightCommitment?: "confirmed"; maxRetries?: number },
+  ) => Promise<string>
+  signMessage?: (message: Uint8Array) => Promise<Uint8Array>
+}
+
 async function signSolanaFundingWithPhantom(
+  adapter: ClusterAwarePhantomAdapter,
   cluster: SolanaDeploymentCluster,
   expectedWalletAddress: string,
   transaction: Transaction,
 ) {
-  const [{ createPhantom }, { createSolanaPlugin }] = await Promise.all([
-    import("@phantom/browser-injected-sdk"),
-    import("@phantom/browser-injected-sdk/solana"),
-  ])
-  const phantom = createPhantom({ plugins: [createSolanaPlugin()] })
-  let connected: { publicKey: string }
-  try {
-    connected = await phantom.solana.connect({ onlyIfTrusted: true })
-  } catch {
-    connected = await phantom.solana.connect()
+  const clusterLabel = cluster === "devnet" ? "Devnet" : "Mainnet"
+  const expectedChain = SOLANA_WALLET_STANDARD_CHAIN[cluster]
+  if (adapter.standard !== true) {
+    throw new Error(`Phantom did not expose a chain-aware Wallet Standard connection for Solana ${clusterLabel}. Update Phantom, ${cluster === "devnet" ? "enable Settings → Developer Settings → Testnet Mode, " : ""}disconnect and reconnect Dappster, then try again. No SOL was sent.`)
   }
-  const connectedAddress = connected.publicKey || phantom.solana.publicKey
-  if (connectedAddress !== expectedWalletAddress) {
-    throw new Error(`Phantom connected ${connectedAddress || "a different account"}, but Dappster expects ${expectedWalletAddress}. Select the linked wallet and try again. No SOL was sent.`)
+  if (adapter.publicKey?.toBase58() !== expectedWalletAddress) {
+    throw new Error(`Phantom connected ${adapter.publicKey?.toBase58() || "a different account"}, but Dappster expects ${expectedWalletAddress}. Select the linked wallet and try again. No SOL was sent.`)
   }
-  await phantom.solana.switchNetwork(cluster === "devnet" ? "devnet" : "mainnet")
-  if (phantom.solana.publicKey && phantom.solana.publicKey !== expectedWalletAddress) {
-    throw new Error(`Phantom switched to account ${phantom.solana.publicKey}, but Dappster expects ${expectedWalletAddress}. No SOL was sent.`)
+  const account = adapter.wallet?.accounts.find(candidate => candidate.address === expectedWalletAddress)
+  if (!account?.chains.includes(expectedChain)) {
+    throw new Error(`Phantom is not exposing Solana ${clusterLabel}. ${cluster === "devnet" ? "Enable Settings → Developer Settings → Testnet Mode, then disconnect and reconnect Dappster." : "Select the Mainnet account, then reconnect Dappster."} No SOL was sent.`)
   }
-  // Network switching and signing must use the same Phantom SDK session. Mixing
-  // Browser SDK switching with Wallet Standard signing makes Phantom simulate
-  // the request against its previous (often Mainnet) network.
-  const signedTransaction = await phantom.solana.signTransaction(transaction) as Transaction
-  if (!signedTransaction.signature) throw new Error("Phantom did not sign the SOL funding transaction")
-  if (signedTransaction.recentBlockhash !== transaction.recentBlockhash) {
-    throw new Error("Phantom returned a funding transaction for a different Solana blockhash. No SOL was sent.")
-  }
-  if (!signedTransaction.feePayer?.equals(new PublicKey(expectedWalletAddress))) {
-    throw new Error("Phantom returned a funding transaction for a different fee payer. No SOL was sent.")
-  }
-  return new Uint8Array(signedTransaction.serialize())
+
+  // Wallet Standard derives its explicit chain identifier from the RPC URL. Use
+  // the canonical endpoint so a custom provider URL can never fall back to Mainnet.
+  // The blockhash, balance and confirmation still come from Dappster's separately
+  // genesis-verified connection.
+  const chainBindingConnection = new Connection(clusterApiUrl(cluster), "confirmed")
+  return adapter.sendTransaction(transaction, chainBindingConnection, {
+    preflightCommitment: "confirmed",
+    maxRetries: 5,
+  })
 }
 
 type Generation = {
@@ -720,11 +737,8 @@ export function PromptBuilder() {
       if (chain === "solana") {
         const targetSolanaCluster = solanaCluster
         const phantom = solana.wallets.find(wallet => wallet.adapter.name === "Phantom" && (wallet.adapter as { standard?: boolean }).standard === true)
-          || solana.wallets.find(wallet => wallet.adapter.name === "Phantom")
-        if (!phantom) throw new Error("Installa o abilita Phantom per autorizzare il deploy Solana")
-        const adapter = phantom.adapter as typeof phantom.adapter & {
-          signMessage?: (message: Uint8Array) => Promise<Uint8Array>
-        }
+        if (!phantom) throw new Error(`Phantom did not expose a chain-aware Wallet Standard connection. Update Phantom, ${targetSolanaCluster === "devnet" ? "enable Settings → Developer Settings → Testnet Mode, " : ""}disconnect and reconnect Dappster, then try again. No SOL was sent.`)
+        const adapter = phantom.adapter as typeof phantom.adapter & ClusterAwarePhantomAdapter
         solana.select(adapter.name)
         if (!adapter.connected) await adapter.connect()
         if (!adapter.publicKey || !adapter.signMessage) throw new Error("Phantom cannot sign this Solana deployment")
@@ -789,30 +803,14 @@ export function PromptBuilder() {
           setDeployStage("funding-ready")
           await new Promise<void>(resolve => { solanaFundingApprovalRef.current = resolve })
           setDeployStage("funding")
-          // Keep Phantom's own network state aligned with the cluster that was already
-          // verified by genesis hash. This prevents Phantom from presenting a Devnet
-          // funding request with its Mainnet account state or simulation context.
-          // Use the same Phantom SDK session for switching and signing. Dappster still broadcasts
-          // the signed bytes only through the selected, genesis-verified cluster RPC.
-          const signedFundingBytes = await signSolanaFundingWithPhantom(targetSolanaCluster, adapter.publicKey.toBase58(), fundingTransaction)
-          const signedFunding = Transaction.from(signedFundingBytes)
-          if (!signedFunding.signature) throw new Error("Phantom did not sign the SOL funding transaction")
-          fundingSignature = bs58.encode(signedFunding.signature)
+          // Wallet Standard binds this request to solana:devnet or solana:mainnet before
+          // Phantom opens. A wallet that cannot advertise the selected chain is rejected
+          // without opening a transaction popup.
+          fundingSignature = await signSolanaFundingWithPhantom(adapter, targetSolanaCluster, adapter.publicKey.toBase58(), fundingTransaction)
           pendingFunding = { signature: fundingSignature, ...latestBlockhash }
           localStorage.setItem(fundingStorageKey, JSON.stringify(pendingFunding))
           const rpcUrls = Array.from(new Set([connection.rpcEndpoint, clusterApiUrl(targetSolanaCluster)]))
           const confirmationConnections = rpcUrls.map(url => url === connection.rpcEndpoint ? connection : new Connection(url, "confirmed"))
-          const broadcasts = await Promise.allSettled(confirmationConnections.map(rpc => rpc.sendRawTransaction(signedFundingBytes, {
-            skipPreflight: false,
-            preflightCommitment: "confirmed",
-            maxRetries: 5,
-          })))
-          if (!broadcasts.some(result => result.status === "fulfilled" && result.value === fundingSignature)) {
-            localStorage.removeItem(fundingStorageKey)
-            const rejected = broadcasts.find(result => result.status === "rejected")
-            const reason = rejected?.status === "rejected" && rejected.reason instanceof Error ? `: ${rejected.reason.message}` : "."
-            throw new Error(`Solana ${targetSolanaCluster === "devnet" ? "Devnet" : "Mainnet"} RPC rejected the signed funding transaction${reason}`)
-          }
           setDeployStage("confirming")
           let observed = false
           const broadcastDeadline = Date.now() + 150_000
@@ -1255,7 +1253,7 @@ export function PromptBuilder() {
         <div className="panel-body form-stack">
           <div><label className="form-label" htmlFor="target-chain">Target ecosystem</label><select id="target-chain" className="select" value={chain} disabled={Boolean(deployStage || contractDeployment)} onChange={event => { setChain(event.target.value as Chain); setGeneration(null); setArtifact(null); setContractDeployment(null); setDeployment(null); setError("") }}>{CHAIN_IDS.map(id => { const item = CHAIN_ADAPTERS[id]; return <option value={id} key={id}>{item.name} · {item.language}</option> })}</select><div style={{color:"#707883",fontSize:10,lineHeight:1.5,marginTop:7}}>{selectedAdapter.toolchain} · {selectedAdapter.deploymentReady ? `Deployment enabled; start on ${selectedAdapter.testNetwork}.` : `Generation and preview enabled. Secure ${selectedAdapter.testNetwork} deployment adapter is being integrated.`}</div></div>
           {chain === "evm" && <div><label className="form-label" htmlFor="evm-network">EVM deployment network</label><select id="evm-network" className="select" value={evmChainId} disabled={Boolean(deployStage || contractDeployment)} onChange={event => { setEvmChainId(Number(event.target.value)); setArtifact(null); setError(""); setRepairNotice("") }}>{SUPPORTED_EVM_CHAINS.map(network => <option value={network.id} key={network.id}>{network.name} · {network.id}</option>)}</select><div style={{color:"#707883",fontSize:10,lineHeight:1.5,marginTop:7}}>The wallet switches to this network before deployment. The same transaction deploys the contract and sends {DAPPSTER_DEPLOYMENT_FEE} {getSupportedEvmChain(evmChainId)?.nativeCurrency.symbol || "native token"} to {DAPPSTER_FEE_RECIPIENT.slice(0, 8)}…{DAPPSTER_FEE_RECIPIENT.slice(-6)}.</div></div>}
-          {chain === "solana" && <div><label className="form-label" htmlFor="solana-network">Solana deployment cluster</label><select id="solana-network" className="select" value={solanaCluster} disabled={Boolean(deployStage || contractDeployment)} onChange={event => setSolanaCluster(event.target.value as SolanaDeploymentCluster)}><option value="devnet">Devnet · recommended for testing</option><option value="mainnet-beta">Mainnet Beta</option></select><div style={{color:"#707883",fontSize:10,lineHeight:1.5,marginTop:7}}>Dappster verifies the selected cluster before Phantom signs anything. You fund the disclosed technical wallet on that cluster; Dappster does not use Mainnet SOL for a Devnet deployment.</div></div>}
+          {chain === "solana" && <div><label className="form-label" htmlFor="solana-network">Solana deployment cluster</label><select id="solana-network" className="select" value={solanaCluster} disabled={Boolean(deployStage || contractDeployment)} onChange={event => setSolanaCluster(event.target.value as SolanaDeploymentCluster)}><option value="devnet">Devnet · recommended for testing</option><option value="mainnet-beta">Mainnet Beta</option></select><div style={{color:"#707883",fontSize:10,lineHeight:1.5,marginTop:7}}>Dappster verifies the selected cluster before Phantom signs anything. For Devnet, first enable Phantom <strong>Settings → Developer Settings → Testnet Mode</strong>, then reconnect. The funding request is bound to <span className="mono">solana:devnet</span>; Dappster does not use Mainnet SOL for a Devnet deployment. <a href="https://docs.phantom.com/developer-powertools/testnet-mode" target="_blank" rel="noreferrer">Phantom guide</a>.</div></div>}
           {chain === "sui" && <div><label className="form-label" htmlFor="sui-wallet">Sui testnet wallet</label><select id="sui-wallet" className="select" value={suiWalletName} disabled={Boolean(deployStage || contractDeployment)} onChange={event => setSuiWalletName(event.target.value)}><option value="">Select a Sui wallet</option>{suiWallets.map(wallet => <option value={wallet.name} key={wallet.name}>{wallet.name}</option>)}</select><div style={{color:"#707883",fontSize:10,lineHeight:1.5,marginTop:7}}>The selected wallet publishes the Move package directly on Sui testnet and pays its gas. Dappster never takes custody of the wallet.</div></div>}
           {chain === "aptos" && <div><label className="form-label" htmlFor="aptos-wallet">Aptos devnet wallet</label><select id="aptos-wallet" className="select" value={aptosWalletName} disabled={Boolean(deployStage || contractDeployment)} onChange={event => setAptosWalletName(event.target.value)}><option value="">Select an Aptos wallet</option>{aptos.wallets.map(wallet => <option value={wallet.name} key={wallet.name}>{wallet.name}</option>)}</select><div style={{color:"#707883",fontSize:10,lineHeight:1.5,marginTop:7}}>The selected wallet publishes the Move package directly on Aptos devnet and pays its gas. Dappster never takes custody of the wallet.</div></div>}
           <div><label className="form-label" htmlFor="prompt">What do you want to build?</label><textarea id="prompt" className="textarea" maxLength={4000} value={prompt} onChange={event => setPrompt(event.target.value)} placeholder={`e.g. ${selectedAdapter.samplePrompts[0]}`} /><div style={{display:"flex",justifyContent:"space-between",marginTop:7,color:"#5f6670",fontSize:10}}><span>Be specific about roles and behavior.</span><span>{prompt.length}/4000</span></div></div>
@@ -1275,7 +1273,7 @@ export function PromptBuilder() {
           {error && <div className="error-box"><AlertCircle size={15} /><span style={{whiteSpace:"pre-wrap"}}>{error}</span></div>}
           {repairNotice && <div className="recovery-box"><Check size={15} /><small style={{display:"block",marginTop:6}}>{repairNotice}</small></div>}
           {generation && chain === "evm" && !contractDeployment && <details className="recovery-box"><summary>Contract already deployed? Recover it</summary><div className="form-stack" style={{marginTop:12}}><div><label className="form-label" htmlFor="deployment-tx">Deployment transaction hash</label><input id="deployment-tx" className="input mono" value={recoveryTxHash} onChange={event => setRecoveryTxHash(event.target.value.trim())} placeholder="0x…" /></div><small>Select the same EVM network used for the transaction. Recovery verifies the fee and continues with IPFS without deploying again.</small><button className="btn btn-outline btn-block" disabled={Boolean(deployStage)} onClick={recoverDeployment}>{deployStage ? <Loader2 className="animate-spin" size={14} /> : <Rocket size={14} />}Recover and publish frontend</button></div></details>}
-          {generation && chain === "solana" && !contractDeployment && <div className="recovery-box"><div><strong>User-funded Solana deployment</strong><small style={{display:"block",marginTop:6,lineHeight:1.5}}>Press <span className="mono">Deploy program + frontend</span>. Dappster calculates the required SOL; Phantom first requests funding for the disclosed technical wallet, then asks for deployment authorization. Dappster publishes the frontend only after verifying the program onchain.</small></div></div>}
+          {generation && chain === "solana" && !contractDeployment && <div className="recovery-box"><div><strong>User-funded Solana deployment</strong><small style={{display:"block",marginTop:6,lineHeight:1.5}}>Press <span className="mono">Deploy program + frontend</span>. Dappster calculates the required SOL; Phantom first requests funding for the disclosed technical wallet on the selected cluster, then asks for deployment authorization. Devnet requires Phantom Testnet Mode. Dappster blocks a wallet that does not advertise the selected chain and publishes the frontend only after verifying the program onchain.</small></div></div>}
           {generation && !selectedAdapter.deploymentReady && <div className="recovery-box"><div><strong>{selectedAdapter.name} generation preview</strong><small style={{display:"block",marginTop:6,lineHeight:1.5}}>The generated source and frontend are saved in your Dashboard. Onchain deployment remains disabled until Dappster can compile with {selectedAdapter.toolchain}, simulate on {selectedAdapter.testNetwork}, obtain a user-wallet signature, and verify the resulting {selectedAdapter.contractNoun.toLowerCase()} onchain.</small></div></div>}
           {loading
             ? <button type="button" className="btn btn-outline btn-block" onClick={cancelGeneration}><X size={16} />Cancel generation</button>
