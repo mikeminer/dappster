@@ -82,6 +82,9 @@ importers:
       '@tanstack/react-query':
         specifier: ^5.40.0
         version: 5.101.4(react@18.3.1)
+      '@vercel/queue':
+        specifier: ^0.1.3
+        version: 0.1.7
       '@vercel/sandbox':
         specifier: ^2.8.0
         version: 2.8.0
@@ -2669,6 +2672,10 @@ packages:
     resolution: {integrity: sha512-UycprH3T6n3jH0k44NHMa7pnFHGu/N05MjojYr+Mc6I7obkoLIJujSWwin1pCvdy/eOxrI/l3uDLQsmcrOb4ug==}
     engines: {node: '>= 20'}
 
+  '@vercel/queue@0.1.7':
+    resolution: {integrity: sha512-4Uk9LOvDPVYqBJGrNDk4fdLte4CmFERXCUJI2y7SRYX1d//dI96Ww7sgKZF4+YDj/YaBXoCZ11AU0HYkVwW9Eg==}
+    engines: {node: '>=20.0.0'}
+
   '@vercel/sandbox@2.8.0':
     resolution: {integrity: sha512-1gmIXWgueeBBwBitVl1xqOsYmVv7xr7qX1qXeqwLGZTKGG1SkkpYkDzpWZ8LIDN0PmPGCqE6lvYao3zP8iz5uw==}
 
@@ -4660,6 +4667,10 @@ packages:
     peerDependenciesMeta:
       typescript:
         optional: true
+
+  mixpart@0.0.6:
+    resolution: {integrity: sha512-CRdXtgfQH2jARmtNmPR0Q7jL20fiESbaYk1b0KvLD0jCdUuemepREtsbd8nbiY6BHV9OGGddAZITNXklupUPUQ==}
+    engines: {node: '>=20.0.0'}
 
   mkdirp@1.0.4:
     resolution: {integrity: sha512-vVqVZQyf3WLx2Shd0qJ9xuvqgAyKPLAiqITEtqW0oIUjzo3PePDd6fW9iFz30ef7Ysp/oiWqbhszeGWW2T6Gzw==}
@@ -9845,6 +9856,13 @@ snapshots:
 
   '@vercel/oidc@3.2.0': {}
 
+  '@vercel/queue@0.1.7':
+    dependencies:
+      '@vercel/oidc': 3.2.0
+      minimatch: 10.2.5
+      mixpart: 0.0.6
+      picocolors: 1.1.1
+
   '@vercel/sandbox@2.8.0':
     dependencies:
       '@vercel/oidc': 3.2.0
@@ -12853,6 +12871,8 @@ snapshots:
   mipd@0.0.7(typescript@5.9.3):
     optionalDependencies:
       typescript: 5.9.3
+
+  mixpart@0.0.6: {}
 
   mkdirp@1.0.4: {}
 

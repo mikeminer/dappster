@@ -43,6 +43,14 @@ const PROGRAM_WRITE_PUBLIC_RPC_DELAY_MS = 325
 const PROGRAM_WRITE_PRIVATE_RPC_DELAY_MS = 50
 const PROGRAM_WRITE_CONFIRM_TIMEOUT_MS = 75_000
 
+export function getSolanaProgramWriteResumeOffset(storedArtifact: Uint8Array | undefined, artifact: Uint8Array) {
+  if (!storedArtifact || storedArtifact.length !== artifact.length) return 0
+  let matchingBytes = 0
+  while (matchingBytes < artifact.length && storedArtifact[matchingBytes] === artifact[matchingBytes]) matchingBytes += 1
+  if (matchingBytes === artifact.length) return artifact.length
+  return Math.floor(matchingBytes / UPGRADEABLE_WRITE_CHUNK_BYTES) * UPGRADEABLE_WRITE_CHUNK_BYTES
+}
+
 function commandError(label: string, stdout: string, stderr: string) {
   const details = [stderr, stdout].filter(Boolean).join("\n").slice(-12_000)
   return new Error(`${label} non riuscita${details ? `:\n${details}` : ""}`)
@@ -897,40 +905,55 @@ export async function deployCompiledSolanaProgram(
   }
   if (existing) throw new Error("The generated Program ID already contains an incomplete account")
 
-  const buffer = Keypair.generate()
+  // A deterministic buffer makes deployment resumable. If the Function or RPC
+  // times out, the next queue delivery reopens the same loader buffer and only
+  // rewrites bytes that are not already present on-chain.
+  const bufferSeed = createHash("sha256")
+    .update("dappster-solana-upgradeable-buffer-v1")
+    .update(program.secretKey)
+    .digest()
+    .subarray(0, 32)
+  const buffer = Keypair.fromSeed(bufferSeed)
   const bufferSpace = UPGRADEABLE_BUFFER_METADATA_BYTES + artifact.length
-  const [bufferRent, programRent] = await Promise.all([
+  const [bufferRent, programRent, existingBuffer] = await Promise.all([
     connection.getMinimumBalanceForRentExemption(bufferSpace, "confirmed"),
     connection.getMinimumBalanceForRentExemption(UPGRADEABLE_PROGRAM_BYTES, "confirmed"),
+    connection.getAccountInfo(buffer.publicKey, "confirmed"),
   ])
+  if (existingBuffer && (!existingBuffer.owner.equals(BPF_LOADER_UPGRADEABLE_PROGRAM_ID) || existingBuffer.data.length !== bufferSpace)) {
+    throw new Error("The resumable Solana deployment buffer has an unexpected owner or size")
+  }
   await ensureTechnicalWalletBalance(
     connection,
     payer.publicKey,
-    bufferRent + programRent + MIN_DEPLOY_FEE_BUFFER,
+    (existingBuffer ? 0 : bufferRent) + programRent + MIN_DEPLOY_FEE_BUFFER,
     cluster,
   )
 
-  let bufferCreated = false
   try {
-    await sendLoaderTransaction(
-      connection,
-      new Transaction().add(
-        SystemProgram.createAccount({
-          fromPubkey: payer.publicKey,
-          newAccountPubkey: buffer.publicKey,
-          lamports: bufferRent,
-          space: bufferSpace,
-          programId: BPF_LOADER_UPGRADEABLE_PROGRAM_ID,
-        }),
-        initializeBufferInstruction(buffer.publicKey, payer.publicKey),
-      ),
-      [payer, buffer],
-      "Upgradeable buffer initialization",
-    )
-    bufferCreated = true
+    if (!existingBuffer) {
+      await sendLoaderTransaction(
+        connection,
+        new Transaction().add(
+          SystemProgram.createAccount({
+            fromPubkey: payer.publicKey,
+            newAccountPubkey: buffer.publicKey,
+            lamports: bufferRent,
+            space: bufferSpace,
+            programId: BPF_LOADER_UPGRADEABLE_PROGRAM_ID,
+          }),
+          initializeBufferInstruction(buffer.publicKey, payer.publicKey),
+        ),
+        [payer, buffer],
+        "Upgradeable buffer initialization",
+      )
+    }
 
+    const bufferAccount = existingBuffer || await connection.getAccountInfo(buffer.publicKey, "confirmed")
+    const storedArtifact = bufferAccount?.data.subarray(UPGRADEABLE_BUFFER_METADATA_BYTES)
+    const resumeOffset = getSolanaProgramWriteResumeOffset(storedArtifact, artifact)
     const publicRpc = rpcUrl(cluster).includes("solana.com")
-    for (let batchOffset = 0; batchOffset < artifact.length; batchOffset += UPGRADEABLE_WRITE_CHUNK_BYTES * PROGRAM_WRITE_BATCH_SIZE) {
+    for (let batchOffset = resumeOffset; batchOffset < artifact.length; batchOffset += UPGRADEABLE_WRITE_CHUNK_BYTES * PROGRAM_WRITE_BATCH_SIZE) {
       const writes: Array<{ offset: number; bytes: Uint8Array }> = []
       for (let index = 0; index < PROGRAM_WRITE_BATCH_SIZE; index += 1) {
         const offset = batchOffset + index * UPGRADEABLE_WRITE_CHUNK_BYTES
@@ -969,16 +992,9 @@ export async function deployCompiledSolanaProgram(
       // only the exact on-chain post-condition; otherwise preserve the error.
       if (!await waitForExecutableUpgradeableProgram(connection, selectedProgram.publicKey)) throw error
     }
-    bufferCreated = false
   } catch (error) {
-    if (bufferCreated) {
-      await sendLoaderTransaction(
-        connection,
-        new Transaction().add(closeBufferInstruction(buffer.publicKey, payer.publicKey, payer.publicKey)),
-        [payer],
-        "Upgradeable buffer cleanup",
-      ).catch(() => undefined)
-    }
+    // Keep the deterministic buffer for the next queue delivery. Its authority
+    // remains the technical wallet and a successful deploy consumes it.
     throw error
   }
 

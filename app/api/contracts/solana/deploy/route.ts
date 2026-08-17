@@ -9,9 +9,10 @@ import {
   verifySolanaDeployFunding,
   verifySolanaDeployAuthorization,
 } from "@/lib/solana-program-deploy"
-import { claimNextSolanaDeployJob, fundAndClaimSolanaDeployJob, getSolanaDeployJob, releaseSolanaDeployJob } from "@/lib/solana-deploy-jobs"
+import { fundAndClaimSolanaDeployJob, getSolanaDeployJob, recordSolanaDeployFunding, releaseSolanaDeployJob } from "@/lib/solana-deploy-jobs"
 import { processClaimedSolanaDeployJob } from "@/lib/solana-deploy-worker"
 import { accountHasWallet } from "@/lib/accounts"
+import { enqueueSolanaDeployJob } from "@/lib/solana-deploy-queue"
 
 export const runtime = "nodejs"
 export const maxDuration = 300
@@ -24,6 +25,36 @@ const schema = z.object({
   signature: z.string().min(64).max(128),
   fundingSignature: z.string().min(64).max(128),
 })
+
+const statusSchema = z.object({ jobId: z.string().uuid() })
+
+function jobResponse(job: Awaited<ReturnType<typeof getSolanaDeployJob>>) {
+  if (!job) throw new Error("Solana deployment job not found")
+  if (job.status === "confirmed") {
+    return { kind: "solana" as const, address: job.program_id, cluster: job.cluster, status: "confirmed" as const, jobId: job.id }
+  }
+  return {
+    kind: "solana-job" as const,
+    jobId: job.id,
+    programId: job.program_id,
+    cluster: job.cluster,
+    status: job.status,
+    attemptCount: job.attempt_count,
+    error: job.error,
+    updatedAt: job.updated_at,
+  }
+}
+
+export async function GET(request: Request) {
+  try {
+    const user = await getRequestUser(request)
+    const input = statusSchema.parse(Object.fromEntries(new URL(request.url).searchParams))
+    const job = await getSolanaDeployJob(input.jobId, user.id, user.isDemo)
+    return NextResponse.json(jobResponse(job))
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Solana deployment status unavailable" }, { status: 400 })
+  }
+}
 
 export async function POST(request: Request) {
   try {
@@ -77,36 +108,30 @@ export async function POST(request: Request) {
       requiredLamports: job.required_lamports,
       expectedMemo: job.funding_memo,
     })
-    const workerToken = randomUUID()
-    const claim = await fundAndClaimSolanaDeployJob({
+    if (user.isDemo) {
+      const workerToken = randomUUID()
+      const claim = await fundAndClaimSolanaDeployJob({
+        jobId: job.id,
+        ownerId: user.id,
+        fundingSignature: input.fundingSignature,
+        fundedLamports: funding.transferredLamports,
+        workerToken,
+        leaseSeconds: maxDuration + 60,
+      }, true)
+      if (!claim.acquired) return NextResponse.json(jobResponse(claim.job), { status: claim.job.status === "confirmed" ? 200 : 202 })
+      const deployed = await processClaimedSolanaDeployJob(claim.job, workerToken, true)
+      return NextResponse.json({ kind: "solana", address: deployed.programId, cluster: input.cluster, status: "confirmed", jobId: job.id })
+    }
+
+    job = await recordSolanaDeployFunding({
       jobId: job.id,
       ownerId: user.id,
       fundingSignature: input.fundingSignature,
       fundedLamports: funding.transferredLamports,
-      workerToken,
-      leaseSeconds: maxDuration + 60,
-    }, user.isDemo)
-    if (claim.job.status === "confirmed") {
-      return NextResponse.json({ kind: "solana", address: claim.job.program_id, cluster: claim.job.cluster, status: "confirmed", jobId: claim.job.id })
-    }
-    if (!claim.acquired) {
-      const recoveryToken = randomUUID()
-      const next = await claimNextSolanaDeployJob(input.cluster, recoveryToken, user.isDemo, maxDuration + 60)
-      if (next.acquired && next.job) await processClaimedSolanaDeployJob(next.job, recoveryToken, user.isDemo).catch(() => undefined)
-      return NextResponse.json({ kind: "solana-job", jobId: job.id, programId: job.program_id, cluster: job.cluster, status: "queued" }, { status: 202 })
-    }
-
-    const deployed = await processClaimedSolanaDeployJob(claim.job, workerToken, user.isDemo)
-    return NextResponse.json({
-      kind: "solana",
-      address: deployed.programId,
-      cluster: input.cluster,
-      status: "confirmed",
-      jobId: job.id,
-      byteLength: deployed.byteLength,
-      fundedBy: authorizedWallet.toBase58(),
-      relayedBy: deployed.payer,
-    })
+    }, false)
+    if (job.status === "confirmed") return NextResponse.json(jobResponse(job))
+    await enqueueSolanaDeployJob({ jobId: job.id, ownerId: user.id })
+    return NextResponse.json(jobResponse(job), { status: 202 })
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Deploy Solana non riuscito" }, { status: 400 })
   }
