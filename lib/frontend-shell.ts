@@ -347,11 +347,21 @@ export function buildEvmRuntimeCompatibilityScript(contractAbi?: Abi, chainId?: 
   `
 }
 
-export function buildHTMLShell(frontendCode: string, contractAddress: string, chain: string, preview = false, contractAbi?: Abi, evmChainId?: number) {
+export function buildHTMLShell(frontendCode: string, contractAddress: string, chain: string, preview = false, contractAbi?: Abi, evmChainId?: number, solanaCluster?: "devnet" | "mainnet-beta") {
   const prepared = browserReadySource(frontendCode)
   const solanaIdl = chain === "solana" ? inferLegacySolanaIdl(prepared.source, contractAddress) : undefined
   const preparedSource = chain === "solana" ? replaceSolanaProgramId(prepared.source, contractAddress) : prepared.source
-  const runtime = JSON.stringify({ contractAddress, chain, preview, abi: contractAbi || null, evmChain: chain === "evm" ? evmRuntimeChain(evmChainId) : undefined }).replace(/</g, "\\u003c")
+  const runtime = JSON.stringify({
+    contractAddress,
+    chain,
+    preview,
+    abi: contractAbi || null,
+    evmChain: chain === "evm" ? evmRuntimeChain(evmChainId) : undefined,
+    solanaCluster: chain === "solana" ? solanaCluster : undefined,
+    solanaRpcUrl: chain === "solana" && solanaCluster
+      ? solanaCluster === "devnet" ? "https://api.devnet.solana.com" : "https://api.mainnet-beta.solana.com"
+      : undefined,
+  }).replace(/</g, "\\u003c")
   const evmCompatibility = buildEvmRuntimeCompatibilityScript(contractAbi, chain === "evm" ? evmChainId : undefined)
   const solanaCompatibility = buildSolanaRuntimeCompatibilityScript(solanaIdl)
   const previewDiagnostics = preview ? buildPreviewDiagnosticsScript(chain) : ""

@@ -1331,7 +1331,8 @@ export function PromptBuilder() {
     true,
     chain === "evm" ? artifact?.abi : undefined,
     chain === "evm" ? evmChainId : undefined,
-  ) : "", [generation, contractDeployment, chain, artifact, evmChainId])
+    chain === "solana" ? solanaCluster : undefined,
+  ) : "", [generation, contractDeployment, chain, artifact, evmChainId, solanaCluster])
   const displayedCredits = creditBalance ?? generation?.creditsRemaining ?? null
   const solanaClusterName = solanaCluster === "devnet" ? "Devnet" : "Mainnet"
   const solanaWalletChain = solanaCluster === "devnet" ? "solana:devnet" : "solana:mainnet"

@@ -12,7 +12,7 @@ import { fetchIpfsContent } from "@/lib/ipfs-gateway"
 export const dynamic = "force-dynamic"
 
 const CID_PATTERN = /^(?:Qm[1-9A-HJ-NP-Za-km-z]{44}|b[a-z2-7]{20,})$/
-const runtimeCache = new Map<string, { abi?: Abi; chainId?: number }>()
+const runtimeCache = new Map<string, { abi?: Abi; chainId?: number; solanaCluster?: "devnet" | "mainnet-beta" }>()
 
 type StoredFrontendDapp = {
   name: string
@@ -23,20 +23,25 @@ type StoredFrontendDapp = {
   chain: string
   contract_address: string | null
   contract_chain_id: number | null
+  contract_network: string | null
 }
 
 async function compiledRuntimeForCid(cid: string) {
   const cached = runtimeCache.get(cid)
   if (cached) return cached
-  const rows = await supabaseRequest<Array<{ name: string; contract_code: string | null; source_bundle_path: string | null; source_bundle_hash: string | null; chain: string; contract_chain_id: number | null }>>({
+  const rows = await supabaseRequest<Array<{ name: string; contract_code: string | null; source_bundle_path: string | null; source_bundle_hash: string | null; chain: string; contract_chain_id: number | null; contract_network: string | null }>>({
     path: "dapps",
-    query: { ipfs_hash: `eq.${cid}`, select: "name,contract_code,source_bundle_path,source_bundle_hash,chain,contract_chain_id", limit: "1" },
+    query: { ipfs_hash: `eq.${cid}`, select: "name,contract_code,source_bundle_path,source_bundle_hash,chain,contract_chain_id,contract_network", limit: "1" },
   })
   const dapp = rows[0] ? await hydrateDappSources(rows[0]) : undefined
-  if (!dapp || dapp.chain !== "evm") return {}
+  if (!dapp) return {}
+  if (dapp.chain === "solana") {
+    return { solanaCluster: dapp.contract_network === "mainnet-beta" ? "mainnet-beta" as const : "devnet" as const }
+  }
+  if (dapp.chain !== "evm") return {}
   const chainId = dapp.contract_chain_id || undefined
   const abi = dapp.contract_code ? compileSolidity(dapp.contract_code, dapp.name, { chainId }).abi : undefined
-  const runtime = { abi, chainId }
+  const runtime: { abi?: Abi; chainId?: number; solanaCluster?: "devnet" | "mainnet-beta" } = { abi, chainId }
   if (runtimeCache.size >= 100) runtimeCache.delete(runtimeCache.keys().next().value as string)
   runtimeCache.set(cid, runtime)
   return runtime
@@ -47,7 +52,7 @@ async function rebuiltFrontendForCid(cid: string) {
     path: "dapps",
     query: {
       ipfs_hash: `eq.${cid}`,
-      select: "name,frontend_code,contract_code,source_bundle_path,source_bundle_hash,chain,contract_address,contract_chain_id",
+      select: "name,frontend_code,contract_code,source_bundle_path,source_bundle_hash,chain,contract_address,contract_chain_id,contract_network",
       limit: "1",
     },
   })
@@ -59,7 +64,14 @@ async function rebuiltFrontendForCid(cid: string) {
     ? compileSolidity(stored.contract_code, stored.name, { chainId }).abi
     : undefined
   const frontendCode = abi ? injectCompiledAbiIntoFrontend(stored.frontend_code, abi) : stored.frontend_code
-  const html = buildHTMLShell(frontendCode, stored.contract_address, stored.chain, false, abi, chainId)
+  const solanaCluster = stored.chain === "solana"
+    ? stored.contract_network === "mainnet-beta" ? "mainnet-beta" as const : "devnet" as const
+    : undefined
+  const clusterAwareHtml = buildHTMLShell(frontendCode, stored.contract_address, stored.chain, false, abi, chainId, solanaCluster)
+  const legacyHtml = solanaCluster
+    ? buildHTMLShell(frontendCode, stored.contract_address, stored.chain, false, abi, chainId)
+    : clusterAwareHtml
+  const html = rawCidV1ForText(clusterAwareHtml) === cid ? clusterAwareHtml : legacyHtml
 
   if (rawCidV1ForText(html) !== cid) {
     console.error("[ipfs] stored frontend CID mismatch", { cid })
@@ -94,21 +106,22 @@ export async function GET(_request: Request, { params }: { params: Promise<{ cid
       let html = rewritePreviewDependencies(await upstream.text())
       let contractAbi: Abi | undefined
       let evmChainId: number | undefined
+      let recoveredSolanaIdl: Record<string, unknown> | undefined
       let solanaCompatibility = buildSolanaRuntimeCompatibilityScript()
       const embedded = html.match(/window\.__DAPPSTER__=({[\s\S]*?});<\/script>/)?.[1]
-      let embeddedRuntime: { abi?: Abi; chain?: string; contractAddress?: string } | undefined
+      let embeddedRuntime: { abi?: Abi; chain?: string; contractAddress?: string; solanaCluster?: "devnet" | "mainnet-beta" } | undefined
       try {
-        embeddedRuntime = embedded ? JSON.parse(embedded) as { abi?: Abi; chain?: string; contractAddress?: string } : undefined
+        embeddedRuntime = embedded ? JSON.parse(embedded) as { abi?: Abi; chain?: string; contractAddress?: string; solanaCluster?: "devnet" | "mainnet-beta" } : undefined
         if (embeddedRuntime?.chain === "solana" && embeddedRuntime.contractAddress) {
           const babelPattern = /(<script type="text\/babel"[^>]*>)([\s\S]*?)(<\/script>)/
           const babel = babelPattern.exec(html)
           if (babel) {
             const programIdSource = replaceSolanaProgramId(babel[2], embeddedRuntime.contractAddress)
             const solanaIdl = inferLegacySolanaIdl(programIdSource, embeddedRuntime.contractAddress)
+            recoveredSolanaIdl = solanaIdl
             const repairedSource = solanaIdl
               ? injectCompiledSolanaIdl(programIdSource, solanaIdl, embeddedRuntime.contractAddress)
               : programIdSource
-            solanaCompatibility = buildSolanaRuntimeCompatibilityScript(solanaIdl)
             html = html.replace(babelPattern, `$1${wrapSolanaBabelSource(repairedSource)}$3`)
           }
         }
@@ -119,6 +132,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ cid
         const compiledRuntime = await compiledRuntimeForCid(cid)
         contractAbi = Array.isArray(embeddedRuntime?.abi) ? embeddedRuntime.abi : compiledRuntime.abi
         evmChainId = compiledRuntime.chainId
+        if (embeddedRuntime?.chain === "solana") {
+          solanaCompatibility = buildSolanaRuntimeCompatibilityScript(recoveredSolanaIdl, embeddedRuntime.solanaCluster || compiledRuntime.solanaCluster)
+        }
         if (contractAbi) html = injectCompiledAbiIntoFrontend(html, contractAbi)
       } catch {
         // Keep the immutable IPFS artifact available even if legacy ABI recovery fails.

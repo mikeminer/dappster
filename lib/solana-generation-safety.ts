@@ -211,6 +211,27 @@ function validateAnchorNumericArguments(frontend: string) {
   return issues
 }
 
+function validateSolanaAddressesAndCluster(frontend: string) {
+  const issues: string[] = []
+  const publicKeyPattern = /new\s+(?:(?:anchor|web3|SolanaWeb3)\s*\.\s*)?PublicKey\s*\(/g
+  for (const match of Array.from(frontend.matchAll(publicKeyPattern))) {
+    const argsStart = (match.index || 0) + match[0].length - 1
+    const argsEnd = matchingDelimiter(frontend, argsStart, "(", ")")
+    if (argsEnd < 0) continue
+    const argument = frontend.slice(argsStart + 1, argsEnd)
+    if (/\.\s*to(?:Lower|Upper)Case\s*\(/.test(argument)) {
+      issues.push("Solana public keys are case-sensitive; never change address capitalization before constructing PublicKey")
+    }
+  }
+  if (/\b(?:mint|address|programId|walletAddress|publicKey)\w*\s*\.\s*to(?:Lower|Upper)Case\s*\(/i.test(frontend)) {
+    issues.push("Solana public keys are case-sensitive; never change address capitalization before constructing PublicKey")
+  }
+  if (/\bclusterApiUrl\s*\(|api\.(?:devnet|mainnet-beta)\.solana\.com/i.test(frontend)) {
+    issues.push("Solana Connection must use window.__DAPPSTER__.solanaRpcUrl so the frontend stays on its deployed cluster")
+  }
+  return issues
+}
+
 export function solanaContractSafetyIssues(contract: string) {
   const issues = [
     ...validateAccountAllocation(contract),
@@ -226,6 +247,7 @@ export function solanaFrontendSafetyIssues(frontend: string) {
   const issues = [
     ...validateProgramConstruction(frontend),
     ...validateAnchorNumericArguments(frontend),
+    ...validateSolanaAddressesAndCluster(frontend),
   ]
   if (/new\s+(?:anchor\s*\.\s*)?Provider\s*\(/.test(frontend)) issues.push("Use AnchorProvider, not the removed legacy Provider")
   if (/\brequire\s*\(/.test(frontend)) issues.push("The frontend uses CommonJS require(), which cannot run in the browser preview")
