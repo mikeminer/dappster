@@ -1,4 +1,5 @@
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
 import {
   buildSolanaImportAliases,
   buildSolanaRuntimeCompatibilityScript,
@@ -16,6 +17,8 @@ assert.match(runtime, /Replaced an invalid Solana public key/)
 assert.match(runtime, /11111111111111111111111111111111/)
 assert.match(runtime, /window\.SolanaWeb3 = modules\.web3/)
 assert.match(runtime, /window\.anchorWeb3 = modules\.web3/)
+assert.match(runtime, /runtime\.web3 = modules\.web3/)
+assert.match(runtime, /runtime\.anchor = modules\.anchor/)
 assert.match(runtime, /const previewProvider = \{/)
 assert.match(runtime, /if \(!window\.phantom\.solana\) window\.phantom\.solana = previewProvider/)
 assert.match(runtime, /if \(!window\.solana\) window\.solana = window\.phantom\.solana/)
@@ -43,6 +46,8 @@ const previewWindow: Record<string, any> = {
 new Function("window", runtime)(previewWindow)
 await previewWindow.__DAPPSTER_SOLANA_READY__
 assert.equal(previewWindow.phantom.solana.isPhantom, true)
+assert.equal(previewWindow.__DAPPSTER__.web3, previewWindow.__DAPPSTER_SOLANA_RUNTIME__.web3)
+assert.equal(previewWindow.__DAPPSTER__.anchor, previewWindow.__DAPPSTER_SOLANA_RUNTIME__.anchor)
 assert.equal(previewWindow.solana, previewWindow.phantom.solana)
 assert.equal((await previewWindow.solana.connect()).publicKey.toBase58(), "11111111111111111111111111111111")
 await assert.rejects(() => previewWindow.solana.signTransaction({}), /Wallet signing is disabled/)
@@ -89,5 +94,30 @@ assert.match(
   normalizedModernProgram,
   /new anchor\.Program\(window\.__DAPPSTER__\.solanaIdl, anchorProvider\)/,
 )
+
+const normalizedPublishedProgram = injectCompiledSolanaIdl(`
+  const provider = window.phantom.solana;
+  await provider.connect();
+  const anchorProvider = new AnchorProvider(
+    connection,
+    { publicKey: new PublicKey(await provider.request({ method: 'getAccountInfo' })) },
+    { commitment: 'confirmed' },
+  );
+  const programInstance = new Program(
+    window.__DAPPSTER__.solanaIdl,
+    new PublicKey(CONTRACT_ADDRESS),
+  );
+`, compiledIdl, deployedProgramId)
+assert.doesNotMatch(normalizedPublishedProgram, /getAccountInfo/)
+assert.match(normalizedPublishedProgram, /publicKey: provider\.publicKey/)
+assert.match(normalizedPublishedProgram, /signTransaction: provider\.signTransaction\.bind\(provider\)/)
+assert.match(normalizedPublishedProgram, /signAllTransactions: provider\.signAllTransactions\.bind\(provider\)/)
+assert.match(
+  normalizedPublishedProgram,
+  /new Program\(window\.__DAPPSTER__\.solanaIdl, anchorProvider\)/,
+)
+
+const ipfsRoute = readFileSync(new URL("../app/ipfs/[cid]/route.ts", import.meta.url), "utf8")
+assert.match(ipfsRoute, /injectCompiledSolanaIdl\(programIdSource, solanaIdl, embeddedRuntime\.contractAddress\)/)
 
 console.log("Solana frontend runtime compatibility checks passed")

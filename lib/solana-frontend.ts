@@ -208,6 +208,20 @@ export function inferLegacySolanaIdl(frontendSource: string, programId: string):
 export function injectCompiledSolanaIdl(frontendSource: string, idl: SolanaIdl, programId: string) {
   const encoded = JSON.stringify({ ...idl, address: programId }).replace(/</g, "\\u003c")
   let source = replaceSolanaProgramId(frontendSource, programId)
+  // Phantom exposes the connected key directly. `getAccountInfo` is not a
+  // Phantom provider request method, and an Anchor wallet must also expose the
+  // signing methods used by AnchorProvider.
+  source = source.replace(
+    /\{\s*publicKey\s*:\s*new\s+PublicKey\s*\(\s*await\s+([A-Za-z_$][\w$]*)\.request\s*\(\s*\{\s*method\s*:\s*["']getAccountInfo["']\s*\}\s*\)\s*\)\s*\}/g,
+    (_, providerName: string) => `{
+      publicKey: ${providerName}.publicKey,
+      signTransaction: ${providerName}.signTransaction.bind(${providerName}),
+      signAllTransactions: ${providerName}.signAllTransactions.bind(${providerName}),
+    }`,
+  )
+  const anchorProviderName = source.match(
+    /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*new\s+(?:(?:window\.__DAPPSTER__\.anchor|anchor)\s*\.\s*)?AnchorProvider\s*\(/,
+  )?.[1]
   // Anchor 0.30 reads the program address from idl.address and accepts the
   // provider as its second argument. Generated frontends sometimes still use
   // the pre-0.30 (idl, programId, provider) constructor, which successfully
@@ -217,6 +231,12 @@ export function injectCompiledSolanaIdl(frontendSource: string, idl: SolanaIdl, 
     /new\s+((?:anchor\s*\.\s*)?Program)\s*\(\s*(?:idl|IDL|window\.__DAPPSTER__\.solanaIdl)\s*,\s*(?:PROGRAM_ID|programId|new\s+PublicKey\s*\([^)]*\))\s*,\s*([A-Za-z_$][\w$]*)\s*\)/g,
     "new $1(window.__DAPPSTER__.solanaIdl, $2)",
   )
+  if (anchorProviderName) {
+    source = source.replace(
+      /new\s+((?:anchor\s*\.\s*)?Program)\s*\(\s*(?:idl|IDL|window\.__DAPPSTER__\.solanaIdl)\s*,\s*(?:PROGRAM_ID|programId|new\s+PublicKey\s*\([^)]*\))\s*,?\s*\)/g,
+      `new $1(window.__DAPPSTER__.solanaIdl, ${anchorProviderName})`,
+    )
+  }
   source = source.replace(
     /new\s+((?:anchor\s*\.\s*)?Program)\s*\(\s*(?:idl|IDL)\s*,/g,
     "new $1(window.__DAPPSTER__.solanaIdl,",
@@ -252,6 +272,10 @@ export function buildSolanaRuntimeCompatibilityScript(solanaIdl?: SolanaIdl) {
           throw new Error("The self-hosted Solana runtime did not load");
         }
         window.Buffer = modules.Buffer;
+        runtime.web3 = modules.web3;
+        runtime.anchor = modules.anchor;
+        runtime.splToken = modules.splToken;
+        runtime.Buffer = modules.Buffer;
         Object.assign(window, modules.web3, modules.anchor, modules.splToken, modules.phantomWalletAdapter || {});
         window.solanaWeb3 = modules.web3;
         window.SolanaWeb3 = modules.web3;
