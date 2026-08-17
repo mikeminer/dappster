@@ -16,6 +16,7 @@ import {
 } from "@solana/web3.js"
 import type { SolanaDeploymentCluster } from "./solana-deployment"
 import { solanaDeployAuthorizationMessage } from "./solana-deploy-auth"
+import { withSolanaSandboxSessionRecovery } from "./solana-sandbox-recovery"
 
 const BUILDER_NAME = "dappster-solana-builder-v1"
 const PROGRAM_CRATE_NAME = "dappster_program"
@@ -392,13 +393,25 @@ async function compileSolanaProgramInSandbox(source: string, programId: string) 
   return { artifact: new Uint8Array(artifact), byteLength: artifact.length, idl }
 }
 
+async function recycleSolanaBuildSandboxSession() {
+  const sandbox = await Sandbox.get({
+    ...sandboxCredentials(),
+    name: BUILDER_NAME,
+    resume: false,
+  })
+  if (sandbox.status === "running" || sandbox.status === "pending") await sandbox.stop()
+}
+
 export async function compileSolanaProgram(source: string, programId: string) {
-  try {
-    return await compileSolanaProgramInSandbox(source, programId)
-  } catch (error) {
-    if (error && typeof error === "object" && ("text" in error || "json" in error)) throw sandboxApiError(error)
-    throw error
+  const compile = async () => {
+    try {
+      return await compileSolanaProgramInSandbox(source, programId)
+    } catch (error) {
+      if (error && typeof error === "object" && ("text" in error || "json" in error)) throw sandboxApiError(error)
+      throw error
+    }
   }
+  return withSolanaSandboxSessionRecovery(compile, recycleSolanaBuildSandboxSession)
 }
 
 function relayerKeypair() {
