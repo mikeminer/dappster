@@ -4,6 +4,7 @@ import { getChainAdapter } from "@/lib/chain-adapters"
 import { compileSolidity } from "@/lib/solidity"
 import { parseMoveSourceBundle } from "@/lib/move-source-bundle"
 import { assertSolanaGenerationSafety, solanaContractSafetyIssues, solanaFrontendSafetyIssues } from "@/lib/solana-generation-safety"
+import { normalizeGenerationWarnings } from "@/lib/generation-output"
 
 type Generation = { contract: string; contractName?: string; programName?: string; frontend: string; deployInstructions: string; warnings: string[] }
 type GenerationOptions = { evmChainId?: number; signal?: AbortSignal }
@@ -36,6 +37,8 @@ function parseJson<T>(value: string): T {
 }
 
 function assertGenerationStructure(generation: Generation, chain: Chain, options: { skipSolanaSafety?: boolean } = {}) {
+  if (!generation || typeof generation !== "object" || Array.isArray(generation)) throw new Error("Generated output is structurally invalid")
+  generation.warnings = normalizeGenerationWarnings(generation.warnings)
   if (typeof generation.contract !== "string" || generation.contract.trim().length < 80) throw new Error("Generated contract source is missing or incomplete")
   if (typeof generation.frontend !== "string" || generation.frontend.trim().length < 80) throw new Error("Generated frontend source is missing or incomplete")
   if (typeof generation.deployInstructions !== "string" || !generation.deployInstructions.trim()) throw new Error("Generated deployment instructions are missing")
