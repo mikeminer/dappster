@@ -172,6 +172,11 @@ function validatePdaCpiAuthorities(contract: string) {
 
 function validateProgramConstruction(frontend: string) {
   const issues: string[] = []
+  const runtimeIdlAliases = new Set<string>()
+  const directAliasPattern = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*window\s*\.\s*__DAPPSTER__\s*(?:\?\s*)?\.\s*solanaIdl\b/g
+  for (const match of Array.from(frontend.matchAll(directAliasPattern))) runtimeIdlAliases.add(match[1])
+  const destructuredAliasPattern = /\b(?:const|let|var)\s*\{\s*solanaIdl(?:\s*:\s*([A-Za-z_$][\w$]*))?\s*\}\s*=\s*window\s*\.\s*__DAPPSTER__\b/g
+  for (const match of Array.from(frontend.matchAll(destructuredAliasPattern))) runtimeIdlAliases.add(match[1] || "solanaIdl")
   const pattern = /new\s+(?:anchor\s*\.\s*)?Program\s*\(/g
   for (const match of Array.from(frontend.matchAll(pattern))) {
     const argsStart = (match.index || 0) + match[0].length - 1
@@ -179,7 +184,12 @@ function validateProgramConstruction(frontend: string) {
     if (argsEnd < 0) continue
     const args = splitTopLevelArguments(frontend.slice(argsStart + 1, argsEnd))
     if (args.length !== 2) issues.push("Anchor 0.30 Program must receive exactly the injected IDL and AnchorProvider")
-    if (args[0] && !/window\s*\.\s*__DAPPSTER__\s*\.\s*solanaIdl/.test(args[0])) {
+    const idlArgument = args[0]?.trim()
+    const usesRuntimeIdl = Boolean(idlArgument && (
+      /window\s*\.\s*__DAPPSTER__\s*(?:\?\s*)?\.\s*solanaIdl/.test(idlArgument)
+      || (/^[A-Za-z_$][\w$]*$/.test(idlArgument) && runtimeIdlAliases.has(idlArgument))
+    ))
+    if (idlArgument && !usesRuntimeIdl) {
       issues.push("Anchor Program must read the compiler IDL from window.__DAPPSTER__.solanaIdl")
     }
   }

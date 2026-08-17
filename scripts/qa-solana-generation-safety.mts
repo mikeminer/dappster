@@ -62,6 +62,16 @@ pub struct DepositAccount {
 `
 
 assert.doesNotThrow(() => assertSolanaGenerationSafety(safeProgram, frontend))
+assert.doesNotThrow(() => assertSolanaGenerationSafety(safeProgram, `
+  const idl = window.__DAPPSTER__.solanaIdl;
+  const anchorProvider = new anchor.AnchorProvider(connection, wallet, { commitment: 'confirmed' });
+  const program = new anchor.Program(idl, anchorProvider);
+`))
+assert.doesNotThrow(() => assertSolanaGenerationSafety(safeProgram, `
+  const { solanaIdl: compilerIdl } = window.__DAPPSTER__;
+  const anchorProvider = new anchor.AnchorProvider(connection, wallet, { commitment: 'confirmed' });
+  const program = new anchor.Program(compilerIdl, anchorProvider);
+`))
 
 const wrongSigner = safeProgram.replace('b"config".as_ref()', 'b"deposit".as_ref()')
 assert.match(solanaGenerationSafetyIssues(wrongSigner, frontend).join("\n"), /signer seeds do not include b"config"/)
@@ -72,6 +82,10 @@ assert.match(solanaGenerationSafetyIssues(underAllocated, frontend).join("\n"), 
 assert.match(
   solanaGenerationSafetyIssues(safeProgram, "new anchor.Program(IDL, PROGRAM_ID, provider)").join("\n"),
   /exactly the injected IDL and AnchorProvider/,
+)
+assert.match(
+  solanaGenerationSafetyIssues(safeProgram, "const IDL = { address: 'hardcoded' }; new anchor.Program(IDL, provider)").join("\n"),
+  /must read the compiler IDL/,
 )
 assert.match(
   solanaGenerationSafetyIssues(safeProgram, "new anchor.Provider(connection, wallet, {})").join("\n"),
