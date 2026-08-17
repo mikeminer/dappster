@@ -113,10 +113,19 @@ function splitArguments(value: string) {
 
 function inferredArgumentType(expression: string, source: string) {
   const value = expression.trim()
+  const escapedValue = value.replace(/[$]/g, "\\$")
   if (/^(?:true|false)$/.test(value) || /(?:^is|^has|^can|^should|enabled|open|active|paused|status$)/i.test(value)) return "bool"
   if (/^['"`]/.test(value)) return "string"
   if (/new\s+(?:anchor\.)?BN\s*\(/.test(value)) return "u64"
-  if (new RegExp(`(?:const|let|var)\\s+${value.replace(/[$]/g, "\\$")}\\s*=\\s*new\\s+(?:anchor\\.)?BN\\s*\\(`).test(source)) return "u64"
+  if (/(?:\|\||\?\?)\s*['"`]/.test(value) || /^String\s*\(/.test(value)) return "string"
+  if (new RegExp(`(?:const|let|var)\\s+${escapedValue}\\s*=\\s*new\\s+(?:anchor\\.)?BN\\s*\\(`).test(source)) return "u64"
+  if (
+    /^[A-Za-z_$][\w$]*$/.test(value)
+    && (
+      new RegExp(`(?:const|let|var)\\s+${escapedValue}\\s*=\\s*['"\`]`).test(source)
+      || new RegExp(`(?:const|let|var)\\s*\\[\\s*${escapedValue}\\s*,[^\\]]+\\]\\s*=\\s*(?:React\\.)?useState(?:\\s*<[^>]+>)?\\s*\\(\\s*['"\`]`).test(source)
+    )
+  ) return "string"
   if (/(?:publicKey|pubkey|authority|owner|recipient|treasury|mint)$/i.test(value)) return "pubkey"
   return "u64"
 }

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs"
 import {
   buildSolanaImportAliases,
   buildSolanaRuntimeCompatibilityScript,
+  inferLegacySolanaIdl,
   injectCompiledSolanaIdl,
 } from "../lib/solana-frontend.ts"
 
@@ -119,6 +120,26 @@ assert.match(normalizedPublishedProgram, /signAllTransactions: provider\.signAll
 assert.match(
   normalizedPublishedProgram,
   /new Program\(window\.__DAPPSTER__\.solanaIdl, anchorProvider\)/,
+)
+
+const inferredMinterIdl = inferLegacySolanaIdl(`
+  const [name, setName] = useState('');
+  const [symbol, setSymbol] = React.useState("");
+  const [uri, setUri] = useState('https://example.com/metadata.json');
+  const [initialSupply, setInitialSupply] = useState('1000000000');
+  const tx = await program.methods
+    .initialize(
+      name || 'Demo Token',
+      symbol || 'DEMO',
+      uri || 'https://example.com/metadata.json',
+      new BN(initialSupply),
+    )
+    .accounts({ authority: provider.publicKey, systemProgram: SystemProgram.programId })
+    .rpc();
+`, deployedProgramId) as any
+assert.deepEqual(
+  inferredMinterIdl.instructions[0].args.map((argument: { type: string }) => argument.type),
+  ["string", "string", "string", "u64"],
 )
 
 const ipfsRoute = readFileSync(new URL("../app/ipfs/[cid]/route.ts", import.meta.url), "utf8")
