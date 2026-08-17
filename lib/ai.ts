@@ -3,7 +3,7 @@ import { DAPPSTER_FEE_SOLIDITY_REQUIREMENTS, hasRequiredDeploymentFee } from "@/
 import { getChainAdapter } from "@/lib/chain-adapters"
 import { compileSolidity } from "@/lib/solidity"
 import { parseMoveSourceBundle } from "@/lib/move-source-bundle"
-import { assertSolanaGenerationSafety } from "@/lib/solana-generation-safety"
+import { assertSolanaGenerationSafety, solanaContractSafetyIssues, solanaFrontendSafetyIssues } from "@/lib/solana-generation-safety"
 
 type Generation = { contract: string; contractName?: string; programName?: string; frontend: string; deployInstructions: string; warnings: string[] }
 type GenerationOptions = { evmChainId?: number; signal?: AbortSignal }
@@ -27,7 +27,7 @@ const compilerRepairPrompts: Partial<Record<Chain, string>> = {
   sui: `You repair Sui Move compiler errors. Preserve product behavior, modules, objects, capabilities, entry functions, events, access control, and public interfaces. Preserve the exact ===== FILE: path ===== source-bundle format and return every required file including Move.toml. Make only changes required by sui move build. Return only strict JSON with one field named contract containing the complete repaired source bundle.`,
   aptos: `You repair Aptos Move compiler errors. Preserve product behavior, modules, resources or objects, entry functions, events, signer checks, access control, and public interfaces. Preserve the exact ===== FILE: path ===== source-bundle format, the dappster_package named address, and every required file including Move.toml. Make only changes required by aptos move build-publish-payload. Return only strict JSON with one field named contract containing the complete repaired source bundle.`,
 }
-const frontendRepairPrompt = `You repair a generated Dappster React frontend without changing its smart contract. Return only strict JSON with one field named frontend containing one complete self-contained React component. Preserve the requested product behavior and every contract interaction. The source must run directly in a browser through Babel standalone: use ES module imports only, never CommonJS require(), never import local files, and never depend on a bundler. Read the deployed address from window.__DAPPSTER__.contractAddress. For EVM use ethers v6 and window.__DAPPSTER__.decodeError(error). For Solana connect directly through window.phantom?.solana or window.solana, use @solana/web3.js and @coral-xyz/anchor, read window.__DAPPSTER__.solanaIdl, and do not use React wallet-adapter providers, WalletMultiButton, or PhantomWalletAdapter.`
+const frontendRepairPrompt = `You repair a generated Dappster React frontend without changing its smart contract. Return only strict JSON with one field named frontend containing one complete self-contained React component. Preserve the requested product behavior and every contract interaction. The source must run directly in a browser through Babel standalone: use ES module imports only, never CommonJS require(), never import local files, and never depend on a bundler. Read the deployed address from window.__DAPPSTER__.contractAddress. For EVM use ethers v6 and window.__DAPPSTER__.decodeError(error). For Solana connect directly through window.phantom?.solana or window.solana, use @solana/web3.js and @coral-xyz/anchor, read window.__DAPPSTER__.solanaIdl, and never import or reference @solana/wallet-adapter-react, @solana/wallet-adapter-react-ui, @solana/wallet-adapter-phantom, React wallet-adapter providers, WalletMultiButton, WalletProvider, or PhantomWalletAdapter.`
 const solanaReviewPrompt = `You are the mandatory final security reviewer for a generated Anchor 0.30.1 dApp. Return only one strict JSON object with contract, programName, frontend, deployInstructions, warnings. Preserve the requested product behavior while repairing every correctness or security defect in the supplied program and frontend. Verify instruction authorization, one-time initialization, PDA derivations, ctx.bumps, account ownership, signer requirements, close destinations, token mint/authority constraints, CPI authority and invoke_signed seeds, checked arithmetic, timestamps, zero values, per-user versus global limits, exact account allocation, and replay/reinitialization behavior. For every token transfer, prove that the authority supplied to the CPI owns the source token account and that signer seeds derive that same authority PDA. Verify the frontend against the Rust accounts and arguments. Use AnchorProvider and exactly new Program(window.__DAPPSTER__.solanaIdl, anchorProvider), direct Phantom injection, @solana/web3.js v1, and no require(), local IDL imports, wallet-adapter UI components, placeholders, or hardcoded deployed Program ID. Do not merely describe problems in warnings: fix them in the returned sources. Warnings may contain only residual product or operational risks that cannot be fixed in code.`
 
 function parseJson<T>(value: string): T {
@@ -35,7 +35,7 @@ function parseJson<T>(value: string): T {
   return JSON.parse(cleaned) as T
 }
 
-function assertGenerationStructure(generation: Generation, chain: Chain) {
+function assertGenerationStructure(generation: Generation, chain: Chain, options: { skipSolanaSafety?: boolean } = {}) {
   if (typeof generation.contract !== "string" || generation.contract.trim().length < 80) throw new Error("Generated contract source is missing or incomplete")
   if (typeof generation.frontend !== "string" || generation.frontend.trim().length < 80) throw new Error("Generated frontend source is missing or incomplete")
   if (typeof generation.deployInstructions !== "string" || !generation.deployInstructions.trim()) throw new Error("Generated deployment instructions are missing")
@@ -43,7 +43,7 @@ function assertGenerationStructure(generation: Generation, chain: Chain) {
   if (chain === "solana") {
     if (!/#\s*\[\s*program\s*\]/.test(generation.contract)) throw new Error("Generated Solana source is missing its #[program] module")
     if (!/anchor_lang::prelude::\*/.test(generation.contract)) throw new Error("Generated Solana source is missing the Anchor prelude")
-    assertSolanaGenerationSafety(generation.contract, generation.frontend)
+    if (!options.skipSolanaSafety) assertSolanaGenerationSafety(generation.contract, generation.frontend)
   }
   if (chain === "sui" || chain === "aptos") parseMoveSourceBundle(generation.contract, chain)
 }
@@ -101,8 +101,32 @@ async function reviewSolanaGeneration(productPrompt: string, generation: Generat
   ].join("\n\n"), "repair", signal)
   if (!output) throw new Error("Solana safety review returned an empty response")
   const reviewed = parseJson<Generation>(output)
-  assertGenerationStructure(reviewed, "solana")
+  // The reviewer can occasionally reintroduce a bundler-only wallet adapter.
+  // Validate its shape here, then run the targeted browser-frontend repair below.
+  assertGenerationStructure(reviewed, "solana", { skipSolanaSafety: true })
   return reviewed
+}
+
+async function repairSolanaFrontendPreflight(productPrompt: string, generation: Generation, signal?: AbortSignal) {
+  let candidate = generation
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const issues = solanaFrontendSafetyIssues(candidate.frontend)
+    if (!issues.length) {
+      assertGenerationStructure(candidate, "solana")
+      return candidate
+    }
+    const frontend = await repairGeneratedFrontend({
+      chain: "solana",
+      productPrompt,
+      contractSource: candidate.contract,
+      frontendSource: candidate.frontend,
+      previewError: `Dappster browser-safety preflight failed:\n- ${issues.join("\n- ")}`,
+      signal,
+    })
+    candidate = { ...candidate, frontend }
+  }
+  assertGenerationStructure(candidate, "solana")
+  return candidate
 }
 
 export async function repairGeneratedFrontend(input: {
@@ -147,12 +171,25 @@ export async function callAI(task: "generate" | "audit", prompt: string, chain: 
       assertGenerationStructure(parsed as Generation, chain)
     } catch (error) {
       const validationError = error instanceof Error ? error.message : "Generated output is structurally invalid"
-      output = await callXAI(generationSystem!, `${prompt}\n\nThe previous JSON output below failed Dappster's source preflight. Repair the complete output without changing the requested product behavior, then return the full strict JSON object again.\n\nPreflight error:\n${validationError}\n\nPrevious JSON output:\n${output}`, "repair", options.signal)
-      if (!output) throw new Error("AI provider returned an empty response")
-      parsed = parseJson<Generation>(output)
-      assertGenerationStructure(parsed, chain)
+      const candidate = parsed as Generation
+      const canRepairOnlyFrontend = chain === "solana"
+        && typeof candidate.contract === "string"
+        && typeof candidate.frontend === "string"
+        && solanaContractSafetyIssues(candidate.contract).length === 0
+        && solanaFrontendSafetyIssues(candidate.frontend).length > 0
+      if (canRepairOnlyFrontend) {
+        parsed = await repairSolanaFrontendPreflight(prompt, candidate, options.signal)
+      } else {
+        output = await callXAI(generationSystem!, `${prompt}\n\nThe previous JSON output below failed Dappster's source preflight. Repair the complete output without changing the requested product behavior, then return the full strict JSON object again.\n\nPreflight error:\n${validationError}\n\nPrevious JSON output:\n${output}`, "repair", options.signal)
+        if (!output) throw new Error("AI provider returned an empty response")
+        parsed = parseJson<Generation>(output)
+        assertGenerationStructure(parsed, chain)
+      }
     }
-    if (chain === "solana") parsed = await reviewSolanaGeneration(prompt, parsed as Generation, options.signal)
+    if (chain === "solana") {
+      parsed = await reviewSolanaGeneration(prompt, parsed as Generation, options.signal)
+      parsed = await repairSolanaFrontendPreflight(prompt, parsed as Generation, options.signal)
+    }
   }
   if (task === "generate" && chain === "evm") {
     const generation = parsed as Generation

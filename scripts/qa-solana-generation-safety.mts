@@ -1,5 +1,10 @@
 import assert from "node:assert/strict"
-import { assertSolanaGenerationSafety, solanaGenerationSafetyIssues } from "../lib/solana-generation-safety.ts"
+import {
+  assertSolanaGenerationSafety,
+  solanaContractSafetyIssues,
+  solanaFrontendSafetyIssues,
+  solanaGenerationSafetyIssues,
+} from "../lib/solana-generation-safety.ts"
 
 const frontend = `
   const anchorProvider = new anchor.AnchorProvider(connection, wallet, { commitment: 'confirmed' });
@@ -91,5 +96,18 @@ assert.match(
   solanaGenerationSafetyIssues(safeProgram, "new anchor.Provider(connection, wallet, {})").join("\n"),
   /Use AnchorProvider/,
 )
+assert.match(
+  solanaFrontendSafetyIssues(`import { WalletMultiButton } from "@solana/wallet-adapter-react-ui"`).join("\n"),
+  /requires a bundler/,
+)
+assert.match(
+  solanaFrontendSafetyIssues(`import { useWallet } from "@solana/wallet-adapter-react"`).join("\n"),
+  /requires a bundler/,
+)
+assert.match(
+  solanaFrontendSafetyIssues(`import { PhantomWalletAdapter } from "@solana/wallet-adapter-phantom"`).join("\n"),
+  /requires a bundler/,
+)
+assert.deepEqual(solanaContractSafetyIssues(safeProgram), [])
 
 console.log("Solana generation safety checks passed")

@@ -196,19 +196,32 @@ function validateProgramConstruction(frontend: string) {
   return issues
 }
 
-export function solanaGenerationSafetyIssues(contract: string, frontend: string) {
+export function solanaContractSafetyIssues(contract: string) {
   const issues = [
     ...validateAccountAllocation(contract),
     ...validatePdaCpiAuthorities(contract),
-    ...validateProgramConstruction(frontend),
   ]
-  if (/new\s+(?:anchor\s*\.\s*)?Provider\s*\(/.test(frontend)) issues.push("Use AnchorProvider, not the removed legacy Provider")
-  if (/\brequire\s*\(/.test(frontend)) issues.push("The frontend uses CommonJS require(), which cannot run in the browser preview")
-  if (/(?:PhantomWalletAdapter|WalletMultiButton|WalletProvider)/.test(frontend)) issues.push("The frontend depends on a wallet-adapter component that requires a bundler")
   if (/\binit_if_needed\b/.test(contract) && /Pubkey\s*::\s*default\s*\(\s*\)/.test(contract)) {
     issues.push("A custom PDA uses init_if_needed plus a default-Pubkey reinitialization guard; use init for one active record or explicit state transitions")
   }
   return Array.from(new Set(issues))
+}
+
+export function solanaFrontendSafetyIssues(frontend: string) {
+  const issues = validateProgramConstruction(frontend)
+  if (/new\s+(?:anchor\s*\.\s*)?Provider\s*\(/.test(frontend)) issues.push("Use AnchorProvider, not the removed legacy Provider")
+  if (/\brequire\s*\(/.test(frontend)) issues.push("The frontend uses CommonJS require(), which cannot run in the browser preview")
+  if (/(?:PhantomWalletAdapter|WalletMultiButton|WalletProvider|@solana\/wallet-adapter-(?:react|react-ui|phantom))/.test(frontend)) {
+    issues.push("The frontend depends on a wallet-adapter component that requires a bundler")
+  }
+  return Array.from(new Set(issues))
+}
+
+export function solanaGenerationSafetyIssues(contract: string, frontend: string) {
+  return Array.from(new Set([
+    ...solanaContractSafetyIssues(contract),
+    ...solanaFrontendSafetyIssues(frontend),
+  ]))
 }
 
 export function assertSolanaGenerationSafety(contract: string, frontend: string) {
