@@ -185,7 +185,13 @@ export function inferLegacySolanaIdl(frontendSource: string, programId: string):
       const value = (parsed[2] || clientName).trim()
       const readonly = /(?:program|rent|clock|instructions|sysvar)$/i.test(clientName)
       const walletSigner = /^(?:authority|payer|signer|user|owner|admin)$/i.test(clientName) && /(?:wallet|publicKey|pubkey|authority|payer|signer|user|owner|admin)/i.test(value)
-      const keypairSigner = new RegExp(`\\.partialSign\\s*\\(\\s*${value.replace(/\.publicKey$/, "").replace(/[$]/g, "\\$")}\\s*\\)`).test(frontendSource)
+      const keypairName = value.replace(/\.publicKey$/, "")
+      const escapedKeypairName = keypairName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+      const partialSigner = new RegExp(`\\.partialSign\\s*\\(\\s*${escapedKeypairName}\\s*\\)`).test(frontendSource)
+      const anchorSigner = Array.from(frontendSource.matchAll(/\.signers\s*\(\s*\[([\s\S]*?)\]\s*\)/g)).some(signerList =>
+        splitArguments(signerList[1]).some(signer => signer.trim() === keypairName),
+      )
+      const keypairSigner = partialSigner || anchorSigner
       return {
         name: snakeCase(clientName),
         ...(!readonly ? { writable: true } : {}),

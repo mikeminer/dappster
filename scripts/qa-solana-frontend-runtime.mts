@@ -127,6 +127,7 @@ const inferredMinterIdl = inferLegacySolanaIdl(`
   const [symbol, setSymbol] = React.useState("");
   const [uri, setUri] = useState('https://example.com/metadata.json');
   const [initialSupply, setInitialSupply] = useState('1000000000');
+  const mintKeypair = Keypair.generate();
   const tx = await program.methods
     .initialize(
       name || 'Demo Token',
@@ -134,13 +135,32 @@ const inferredMinterIdl = inferLegacySolanaIdl(`
       uri || 'https://example.com/metadata.json',
       new BN(initialSupply),
     )
-    .accounts({ authority: provider.publicKey, systemProgram: SystemProgram.programId })
+    .accounts({ mint: mintKeypair.publicKey, authority: provider.publicKey, systemProgram: SystemProgram.programId })
+    .signers([mintKeypair])
     .rpc();
 `, deployedProgramId) as any
 assert.deepEqual(
   inferredMinterIdl.instructions[0].args.map((argument: { type: string }) => argument.type),
   ["string", "string", "string", "u64"],
 )
+const inferredMintAccount = inferredMinterIdl.instructions[0].accounts.find(
+  (account: { name: string }) => account.name === "mint",
+)
+assert.equal(inferredMintAccount?.writable, true)
+assert.equal(inferredMintAccount?.signer, true)
+
+const inferredPartialSignerIdl = inferLegacySolanaIdl(`
+  const mintKeypair = Keypair.generate();
+  const tx = await program.methods
+    .initialize()
+    .accounts({ mint: mintKeypair.publicKey, authority: provider.publicKey })
+    .transaction();
+  tx.partialSign(mintKeypair);
+`, deployedProgramId) as any
+const inferredPartialSignerAccount = inferredPartialSignerIdl.instructions[0].accounts.find(
+  (account: { name: string }) => account.name === "mint",
+)
+assert.equal(inferredPartialSignerAccount?.signer, true)
 
 const ipfsRoute = readFileSync(new URL("../app/ipfs/[cid]/route.ts", import.meta.url), "utf8")
 assert.match(ipfsRoute, /injectCompiledSolanaIdl\(programIdSource, solanaIdl, embeddedRuntime\.contractAddress\)/)
