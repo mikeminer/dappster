@@ -237,6 +237,15 @@ export function solanaContractSafetyIssues(contract: string) {
     ...validateAccountAllocation(contract),
     ...validatePdaCpiAuthorities(contract),
   ]
+  const usesLegacyTokenAccounts = /anchor_spl\s*::\s*token\s*(?:::|\{)/.test(contract)
+    || /\bProgram\s*<\s*'info\s*,\s*Token\s*>/.test(contract)
+    || /\bAccount\s*<\s*'info\s*,\s*(?:Mint|TokenAccount)\s*>/.test(contract)
+  const usesTokenInterface = /anchor_spl\s*::\s*token_interface\b/.test(contract)
+    && /\bInterface(?:Account)?\s*</.test(contract)
+    && /\bTokenInterface\b/.test(contract)
+  if (usesLegacyTokenAccounts && !usesTokenInterface) {
+    issues.push("SPL token programs must use anchor_spl::token_interface with InterfaceAccount and TokenInterface so both the legacy Token Program and Token-2022 mints are supported")
+  }
   if (/\binit_if_needed\b/.test(contract) && /Pubkey\s*::\s*default\s*\(\s*\)/.test(contract)) {
     issues.push("A custom PDA uses init_if_needed plus a default-Pubkey reinitialization guard; use init for one active record or explicit state transitions")
   }
@@ -253,6 +262,12 @@ export function solanaFrontendSafetyIssues(frontend: string) {
   if (/\brequire\s*\(/.test(frontend)) issues.push("The frontend uses CommonJS require(), which cannot run in the browser preview")
   if (/(?:PhantomWalletAdapter|WalletMultiButton|WalletProvider|@solana\/wallet-adapter-(?:react|react-ui|phantom))/.test(frontend)) {
     issues.push("The frontend depends on a wallet-adapter component that requires a bundler")
+  }
+  const hardcodesLegacyTokenProgram = /\bTOKEN_PROGRAM_ID\b/.test(frontend)
+    && !/\bTOKEN_2022_PROGRAM_ID\b/.test(frontend)
+    && !/getAccountInfo\s*\([^)]*(?:mint|Mint)[^)]*\)[\s\S]{0,500}?\.owner\b/.test(frontend)
+  if (hardcodesLegacyTokenProgram) {
+    issues.push("The frontend hardcodes the legacy TOKEN_PROGRAM_ID; read the mint account owner and use that token program for ATA derivation and Anchor accounts so Token-2022 mints work")
   }
   return Array.from(new Set(issues))
 }
