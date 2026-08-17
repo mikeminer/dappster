@@ -118,6 +118,86 @@ export async function getSolanaDeployJob(jobId: string, ownerId: string, isDemo:
   return job?.owner_id === ownerId ? job : null
 }
 
+export async function recordSolanaDeployFunding(input: {
+  jobId: string
+  ownerId: string
+  fundingSignature: string
+  fundedLamports: number
+}, isDemo: boolean) {
+  if (!isDemo) {
+    const existing = await getSolanaDeployJob(input.jobId, input.ownerId, false)
+    if (!existing) throw new Error("Solana deployment job not found")
+    if (existing.funding_signature && existing.funding_signature !== input.fundingSignature) {
+      throw new Error("Deployment job already has a different funding transaction")
+    }
+    if (input.fundedLamports < existing.required_lamports) throw new Error("Insufficient deployment funding")
+    if (existing.status === "confirmed" || existing.status === "deploying") return existing
+
+    await supabaseRequest({
+      path: "solana_deploy_jobs",
+      method: "PATCH",
+      query: { id: `eq.${input.jobId}`, owner_id: `eq.${input.ownerId}` },
+      body: {
+        funding_signature: input.fundingSignature,
+        funded_lamports: input.fundedLamports,
+        status: "funded",
+        worker_token: null,
+        lease_expires_at: null,
+        error: null,
+        updated_at: new Date().toISOString(),
+      },
+    })
+    const funded = await getSolanaDeployJob(input.jobId, input.ownerId, false)
+    if (!funded) throw new Error("Solana deployment funding could not be recorded")
+    return funded
+  }
+
+  const queue = localQueue()
+  const job = queue.jobs.get(input.jobId)
+  if (!job || job.owner_id !== input.ownerId) throw new Error("Job di deploy Solana non trovato")
+  const signatureJobId = queue.fundingSignatures.get(input.fundingSignature)
+  if (signatureJobId && signatureJobId !== job.id) throw new Error("Questa transazione di finanziamento è già associata a un altro deploy")
+  if (job.funding_signature && job.funding_signature !== input.fundingSignature) throw new Error("Il job è già associato a un altro finanziamento")
+  if (input.fundedLamports < job.required_lamports) throw new Error("Insufficient deployment funding")
+  if (job.status === "confirmed" || job.status === "deploying") return job
+  queue.fundingSignatures.set(input.fundingSignature, job.id)
+  job.funding_signature = input.fundingSignature
+  job.funded_lamports = input.fundedLamports
+  job.status = "funded"
+  job.worker_token = null
+  job.lease_expires_at = null
+  job.error = null
+  job.updated_at = new Date().toISOString()
+  return job
+}
+
+export async function failSolanaDeployJob(jobId: string, ownerId: string, error: string, isDemo: boolean) {
+  if (!isDemo) {
+    await supabaseRequest({
+      path: "solana_deploy_jobs",
+      method: "PATCH",
+      query: { id: `eq.${jobId}`, owner_id: `eq.${ownerId}` },
+      body: {
+        status: "failed",
+        worker_token: null,
+        lease_expires_at: null,
+        error: error.slice(0, 4000),
+        updated_at: new Date().toISOString(),
+      },
+    })
+    return
+  }
+  const job = localQueue().jobs.get(jobId)
+  if (!job || job.owner_id !== ownerId) return
+  job.status = "failed"
+  job.worker_token = null
+  job.lease_expires_at = null
+  job.error = error.slice(0, 4000)
+  job.updated_at = new Date().toISOString()
+  const lock = localQueue().locks.get(job.cluster)
+  if (lock?.jobId === job.id) localQueue().locks.delete(job.cluster)
+}
+
 export async function fundAndClaimSolanaDeployJob(input: {
   jobId: string
   ownerId: string

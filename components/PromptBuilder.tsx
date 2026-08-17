@@ -184,7 +184,10 @@ type QueuedSolanaDeployment = {
   jobId: string
   programId: string
   cluster: "devnet" | "mainnet-beta"
-  status: "queued"
+  status: "quoted" | "funded" | "deploying" | "failed"
+  attemptCount?: number
+  error?: string | null
+  updatedAt?: string
 }
 
 type PendingSolanaFunding = {
@@ -848,16 +851,18 @@ export function PromptBuilder() {
         const signature = bs58.encode(await adapter.signMessage(message))
         setDeployStage("compiling")
         let confirmed: SolanaProgramDeployment | null = null
+        const started = await apiFetch<SolanaProgramDeployment | QueuedSolanaDeployment>("/api/contracts/solana/deploy", {
+          method: "POST",
+          body: JSON.stringify({ dappId: generation.dappId, jobId: quote.jobId, cluster: targetSolanaCluster, wallet: adapter.publicKey.toBase58(), signature, fundingSignature }),
+        })
+        if (started.kind === "solana") confirmed = started
+        else setDeployStage(started.status === "deploying" ? "compiling" : "queued")
         for (let attempt = 0; attempt < 720 && !confirmed; attempt += 1) {
-          const result = await apiFetch<SolanaProgramDeployment | QueuedSolanaDeployment>("/api/contracts/solana/deploy", {
-            method: "POST",
-            body: JSON.stringify({ dappId: generation.dappId, jobId: quote.jobId, cluster: targetSolanaCluster, wallet: adapter.publicKey.toBase58(), signature, fundingSignature }),
-          })
-          if (result.kind === "solana") confirmed = result
-          else {
-            setDeployStage("queued")
-            await new Promise(resolve => setTimeout(resolve, 5_000))
-          }
+          await new Promise(resolve => setTimeout(resolve, 5_000))
+          const status = await apiFetch<SolanaProgramDeployment | QueuedSolanaDeployment>(`/api/contracts/solana/deploy?jobId=${encodeURIComponent(quote.jobId)}`)
+          if (status.kind === "solana") confirmed = status
+          else if (status.status === "failed") throw new Error(status.error || "Solana deployment failed. Your recorded payment remains attached to this job.")
+          else setDeployStage(status.status === "deploying" ? "compiling" : "queued")
         }
         if (!confirmed) throw new Error("Il deploy è ancora in coda. Puoi riprovare senza effettuare un nuovo pagamento.")
         localStorage.removeItem(fundingStorageKey)
