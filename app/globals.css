@@ -214,6 +214,12 @@ button { color: inherit; }
 .example:hover, .example:focus-visible { color: #dce0e5; border-color: #3c434d; outline: none; }
 .example:focus-visible { box-shadow: 0 0 0 2px rgba(199,255,50,.2); }
 .code-window { min-height: 545px; background: #090b0e; overflow: hidden; }
+.code-window > .panel-head { min-height: 79px; gap: 12px; }
+.builder-deploy-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: nowrap; min-width: 0; }
+.builder-deploy-button { flex: 0 0 270px; width: 270px; white-space: nowrap; contain: layout; }
+.builder-deploy-button:disabled:hover { transform: none; }
+.builder-deploy-spinner { flex: 0 0 14px; transform-origin: 50% 50%; will-change: transform; }
+.builder-deploy-label { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .code-tabs { display: flex; gap: 2px; padding: 0 14px; border-bottom: 1px solid var(--line); }
 .code-tab { padding: 15px 14px 12px; color: #717983; font: 11px/1 "SFMono-Regular", Consolas, monospace; border-bottom: 2px solid transparent; cursor: pointer; }
 .code-tab.active { color: var(--acid); border-color: var(--acid); }
@@ -540,6 +546,8 @@ button { color: inherit; }
   .credit-pro-note { align-items: flex-start; flex-direction: column; gap: 9px; }
   .card-grid { grid-template-columns: repeat(2, 1fr); }
   .builder-grid, .audit-layout { grid-template-columns: 1fr; }
+  .code-window > .panel-head { min-height: 132px; align-content: center; flex-wrap: wrap; }
+  .code-window > .panel-head .status-line, .builder-deploy-actions { width: 100%; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
   .stat:nth-child(2) { border-right: 0; }
   .stat:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
@@ -579,6 +587,11 @@ button { color: inherit; }
   .profile-form { grid-template-columns: 1fr; }
   .profile-form .btn { width: 100%; }
   .panel-head { flex-wrap: wrap; gap: 10px; padding: 16px 18px; }
+  .code-window > .panel-head { min-height: 166px; align-content: center; }
+  .code-window > .panel-head .status-line { width: 100%; min-height: 18px; }
+  .builder-deploy-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); width: 100%; }
+  .builder-deploy-actions > .btn-ghost { width: 100%; }
+  .builder-deploy-button { grid-column: 1 / -1; width: 100%; min-width: 0; }
   .panel-body { padding: 18px; }
   .developer-benefit-badge { grid-template-columns: 46px minmax(0, 1fr); gap: 12px; padding: 18px 16px; }
   .developer-benefit-medal { width: 46px; height: 46px; }
