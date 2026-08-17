@@ -343,7 +343,7 @@ export async function prepareFridgeProgramUpgrade(artifact: Uint8Array) {
       FRIDGE_UPGRADE_AUTHORITY,
     ))
   }
-  transaction.add(upgradeInstruction(state.programData, state.buffer.publicKey, state.payer.publicKey))
+  transaction.add(upgradeInstruction(state.programData, state.buffer.publicKey, FRIDGE_UPGRADE_AUTHORITY))
   return {
     ...(await quoteFridgeProgramUpgrade(artifact)),
     transaction: transaction.serialize({ requireAllSignatures: false, verifySignatures: false }).toString("base64"),
