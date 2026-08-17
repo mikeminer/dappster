@@ -6,6 +6,7 @@ import {
   extractCompiledSolanaIdl,
   inferLegacySolanaIdl,
   injectCompiledSolanaIdl,
+  solanaBrowserRpcUrl,
 } from "../lib/solana-frontend.ts"
 
 const runtime = buildSolanaRuntimeCompatibilityScript()
@@ -79,12 +80,23 @@ const clusterWindow: Record<string, any> = {
 new Function("window", clusterRuntime)(clusterWindow)
 await clusterWindow.__DAPPSTER_SOLANA_READY__
 assert.equal(clusterWindow.__DAPPSTER__.solanaCluster, "devnet")
-assert.equal(clusterWindow.__DAPPSTER__.solanaRpcUrl, "https://api.devnet.solana.com")
-assert.equal(new clusterWindow.Connection("https://api.mainnet-beta.solana.com").endpoint, "https://api.devnet.solana.com")
+assert.equal(clusterWindow.__DAPPSTER__.solanaRpcUrl, solanaBrowserRpcUrl("devnet"))
+assert.equal(new clusterWindow.Connection("https://api.mainnet-beta.solana.com").endpoint, solanaBrowserRpcUrl("devnet"))
 await assert.rejects(
   () => clusterWindow.__DAPPSTER__.assertSolanaAccount(new clusterWindow.Connection("ignored"), "missing", "SPL token mint"),
   /does not exist on Solana Devnet/,
 )
+
+const mainnetRuntime = buildSolanaRuntimeCompatibilityScript(undefined, "mainnet-beta")
+const mainnetWindow: Record<string, any> = {
+  __DAPPSTER__: { chain: "solana", preview: false },
+  __DAPPSTER_SOLANA_RUNTIME__: clusterWindow.__DAPPSTER_SOLANA_RUNTIME__,
+}
+new Function("window", mainnetRuntime)(mainnetWindow)
+await mainnetWindow.__DAPPSTER_SOLANA_READY__
+assert.equal(mainnetWindow.__DAPPSTER__.solanaRpcUrl, solanaBrowserRpcUrl("mainnet-beta"))
+assert.equal(new mainnetWindow.Connection("https://api.devnet.solana.com").endpoint, solanaBrowserRpcUrl("mainnet-beta"))
+assert.doesNotMatch(mainnetRuntime, /api\.mainnet-beta\.solana\.com/)
 
 class MockBN {
   value: string

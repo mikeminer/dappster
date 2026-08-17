@@ -3,6 +3,11 @@ import { createHash } from "crypto"
 export type SolanaIdl = Record<string, unknown>
 
 const SOLANA_RUNTIME_MARKER = "dappster-solana-runtime-v1"
+const DAPPSTER_SOLANA_RPC_PROXY = "https://dappster.fun/api/public/solana-rpc"
+
+export function solanaBrowserRpcUrl(cluster: "devnet" | "mainnet-beta") {
+  return `${DAPPSTER_SOLANA_RPC_PROXY}?cluster=${cluster}`
+}
 
 const SOLANA_BROWSER_MODULES: Record<string, string> = {
   "@solana/web3.js": "window.solanaWeb3",
@@ -297,7 +302,7 @@ export function buildSolanaRuntimeCompatibilityScript(solanaIdl?: SolanaIdl, sol
     ? `runtime.solanaIdl = ${JSON.stringify(solanaIdl).replace(/</g, "\\u003c")};`
     : ""
   const clusterAssignment = solanaCluster
-    ? `runtime.solanaCluster = ${JSON.stringify(solanaCluster)}; runtime.solanaRpcUrl = ${JSON.stringify(solanaCluster === "devnet" ? "https://api.devnet.solana.com" : "https://api.mainnet-beta.solana.com")};`
+    ? `runtime.solanaCluster = ${JSON.stringify(solanaCluster)}; runtime.solanaRpcUrl = ${JSON.stringify(solanaBrowserRpcUrl(solanaCluster))};`
     : ""
   return `
     (function () {
