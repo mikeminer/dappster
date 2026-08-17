@@ -6,6 +6,9 @@ const walletProvider = await readFile(new URL("../components/WalletProvider.tsx"
 const quoteRoute = await readFile(new URL("../app/api/contracts/solana/quote/route.ts", import.meta.url), "utf8")
 const deployRoute = await readFile(new URL("../app/api/contracts/solana/deploy/route.ts", import.meta.url), "utf8")
 const deployLibrary = await readFile(new URL("../lib/solana-program-deploy.ts", import.meta.url), "utf8")
+const deployWorker = await readFile(new URL("../lib/solana-deploy-worker.ts", import.meta.url), "utf8")
+const frontendDeployRoute = await readFile(new URL("../app/api/deploy/route.ts", import.meta.url), "utf8")
+const ipfsRoute = await readFile(new URL("../app/ipfs/[cid]/route.ts", import.meta.url), "utf8")
 
 assert.match(
   promptBuilder,
@@ -72,5 +75,11 @@ assert.match(quoteRoute, /cluster: input\.cluster/, "The deployment job must per
 assert.match(deployRoute, /job\.cluster !== input\.cluster/, "Deployment must reject a job from a different cluster.")
 assert.match(deployRoute, /verifySolanaDeployFunding\(\{[\s\S]*cluster: input\.cluster/, "Funding verification must use the requested cluster.")
 assert.match(deployLibrary, /cluster === "devnet"[\s\S]*SOLANA_DEVNET_RPC_URL[\s\S]*SOLANA_MAINNET_RPC_URL/, "Server-side quote, funding verification and deployment must resolve cluster-specific RPCs.")
+assert.match(promptBuilder, /contract_network: requestedSolanaCluster/, "A Solana project must persist the selected cluster when generation starts.")
+assert.match(promptBuilder, /savedPending\.solanaCluster !== requestedSolanaCluster/, "A pending generation from another Solana cluster must never be reused.")
+assert.match(deployWorker, /contract_network: job\.cluster/, "The Solana worker must persist the authoritative job cluster with the Program ID.")
+assert.match(frontendDeployRoute, /storedCluster && storedCluster !== input\.solanaCluster/, "Frontend publication must reject a cluster that differs from the stored deployment.")
+assert.match(frontendDeployRoute, /deployFrontendToIPFS\([\s\S]*input\.solanaCluster/, "Frontend publication must pass the verified Solana cluster into the IPFS shell.")
+assert.match(ipfsRoute, /compiledRuntime\.solanaCluster \|\| legacySolanaCluster/, "The IPFS compatibility layer must prefer the stored or on-chain Solana cluster over legacy frontend text.")
 
 console.log("Solana cluster-aware funding checks passed")

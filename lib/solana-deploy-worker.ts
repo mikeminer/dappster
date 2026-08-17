@@ -61,8 +61,8 @@ export async function processClaimedSolanaDeployJob(job: SolanaDeployJob, worker
     const frontendCode = dapp.frontend_code
       ? injectCompiledSolanaIdl(dapp.frontend_code, built.idl, deployed.programId)
       : undefined
-    if (localDapp) localUpdateDapp(job.dapp_id, { contract_address: deployed.programId, contract_deployed_at: deployedAt, deploy_status: "draft", ...(frontendCode ? { frontend_code: frontendCode } : {}) })
-    else await supabaseRequest({ path: "dapps", method: "PATCH", query: { id: `eq.${job.dapp_id}`, owner_id: `eq.${job.owner_id}` }, body: { contract_address: deployed.programId, contract_deployed_at: deployedAt, deploy_status: "draft", ...(frontendCode ? { frontend_code: frontendCode } : {}), updated_at: deployedAt } })
+    if (localDapp) localUpdateDapp(job.dapp_id, { contract_address: deployed.programId, contract_network: job.cluster, contract_deployed_at: deployedAt, deploy_status: "draft", ...(frontendCode ? { frontend_code: frontendCode } : {}) })
+    else await supabaseRequest({ path: "dapps", method: "PATCH", query: { id: `eq.${job.dapp_id}`, owner_id: `eq.${job.owner_id}` }, body: { contract_address: deployed.programId, contract_network: job.cluster, contract_deployed_at: deployedAt, deploy_status: "draft", ...(frontendCode ? { frontend_code: frontendCode } : {}), updated_at: deployedAt } })
     // Publish the completed job only after the compiler IDL and final Program
     // ID are durable. Otherwise the client can pin a frontend in the small
     // window between job confirmation and this database update.
