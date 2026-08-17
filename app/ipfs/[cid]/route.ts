@@ -27,6 +27,12 @@ type StoredFrontendDapp = {
   contract_network: string | null
 }
 
+function inferLegacySolanaCluster(html: string) {
+  if (/api\.devnet\.solana\.com|clusterApiUrl\s*\(\s*["']devnet["']\s*\)/i.test(html)) return "devnet" as const
+  if (/api\.mainnet-beta\.solana\.com|clusterApiUrl\s*\(\s*["']mainnet-beta["']\s*\)/i.test(html)) return "mainnet-beta" as const
+  return undefined
+}
+
 async function compiledRuntimeForCid(cid: string) {
   const cached = runtimeCache.get(cid)
   if (cached) return cached
@@ -121,9 +127,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ cid
       let solanaBabelSource: string | undefined
       const embedded = html.match(/window\.__DAPPSTER__=({[\s\S]*?});<\/script>/)?.[1]
       let embeddedRuntime: { abi?: Abi; chain?: string; contractAddress?: string; solanaCluster?: "devnet" | "mainnet-beta" } | undefined
+      let legacySolanaCluster: "devnet" | "mainnet-beta" | undefined
       try {
         embeddedRuntime = embedded ? JSON.parse(embedded) as { abi?: Abi; chain?: string; contractAddress?: string; solanaCluster?: "devnet" | "mainnet-beta" } : undefined
         if (embeddedRuntime?.chain === "solana" && embeddedRuntime.contractAddress) {
+          legacySolanaCluster = embeddedRuntime.solanaCluster || inferLegacySolanaCluster(html)
           const babel = babelPattern.exec(html)
           if (babel) {
             solanaBabelSource = replaceSolanaProgramId(babel[2], embeddedRuntime.contractAddress)
@@ -134,13 +142,16 @@ export async function GET(_request: Request, { params }: { params: Promise<{ cid
       } catch {
         // A malformed legacy runtime must not prevent the immutable artifact from loading.
       }
+      if (embeddedRuntime?.chain === "solana" && legacySolanaCluster) {
+        solanaCompatibility = buildSolanaRuntimeCompatibilityScript(recoveredSolanaIdl, legacySolanaCluster)
+      }
       try {
         const compiledRuntime = await compiledRuntimeForCid(cid)
         contractAbi = Array.isArray(embeddedRuntime?.abi) ? embeddedRuntime.abi : compiledRuntime.abi
         evmChainId = compiledRuntime.chainId
         if (embeddedRuntime?.chain === "solana") {
           recoveredSolanaIdl = compiledRuntime.solanaIdl || recoveredSolanaIdl
-          solanaCompatibility = buildSolanaRuntimeCompatibilityScript(recoveredSolanaIdl, embeddedRuntime.solanaCluster || compiledRuntime.solanaCluster)
+          solanaCompatibility = buildSolanaRuntimeCompatibilityScript(recoveredSolanaIdl, legacySolanaCluster || compiledRuntime.solanaCluster)
         }
         if (contractAbi) html = injectCompiledAbiIntoFrontend(html, contractAbi)
       } catch {
