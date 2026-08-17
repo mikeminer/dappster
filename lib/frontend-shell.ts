@@ -1,6 +1,6 @@
 import type { Abi } from "viem"
 import { getSupportedEvmChain } from "@/lib/evm-chains"
-import { buildSolanaImportAliases, buildSolanaRuntimeCompatibilityScript, inferLegacySolanaIdl, replaceSolanaProgramId, wrapSolanaBabelSource } from "@/lib/solana-frontend"
+import { buildSolanaImportAliases, buildSolanaRuntimeCompatibilityScript, extractCompiledSolanaIdl, inferLegacySolanaIdl, replaceSolanaProgramId, wrapSolanaBabelSource } from "@/lib/solana-frontend"
 
 const DAPPSTER_RUNTIME_ORIGIN = "https://dappster.fun/runtime"
 const PREVIEW_RUNTIME_ASSETS = {
@@ -349,7 +349,9 @@ export function buildEvmRuntimeCompatibilityScript(contractAbi?: Abi, chainId?: 
 
 export function buildHTMLShell(frontendCode: string, contractAddress: string, chain: string, preview = false, contractAbi?: Abi, evmChainId?: number, solanaCluster?: "devnet" | "mainnet-beta") {
   const prepared = browserReadySource(frontendCode)
-  const solanaIdl = chain === "solana" ? inferLegacySolanaIdl(prepared.source, contractAddress) : undefined
+  const solanaIdl = chain === "solana"
+    ? extractCompiledSolanaIdl(prepared.source, contractAddress) || inferLegacySolanaIdl(prepared.source, contractAddress)
+    : undefined
   const preparedSource = chain === "solana" ? replaceSolanaProgramId(prepared.source, contractAddress) : prepared.source
   const runtime = JSON.stringify({
     contractAddress,

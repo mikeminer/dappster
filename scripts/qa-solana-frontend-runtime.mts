@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs"
 import {
   buildSolanaImportAliases,
   buildSolanaRuntimeCompatibilityScript,
+  extractCompiledSolanaIdl,
   inferLegacySolanaIdl,
   injectCompiledSolanaIdl,
 } from "../lib/solana-frontend.ts"
@@ -157,7 +158,22 @@ const compiledIdl = {
   metadata: { name: "counter", version: "0.1.0", spec: "0.1.0" },
   instructions: [],
 }
+const compiledAccountIdl = {
+  ...compiledIdl,
+  accounts: [{ name: "lock", discriminator: [1, 2, 3, 4, 5, 6, 7, 8] }],
+  types: [{ name: "lock", type: { kind: "struct", fields: [{ name: "depositor", type: "pubkey" }] } }],
+}
 const deployedProgramId = "BPFLoaderUpgradeab1e11111111111111111111111"
+const embeddedCompiledIdl = injectCompiledSolanaIdl(
+  "const program = new Program(window.__DAPPSTER__.solanaIdl, provider);",
+  compiledAccountIdl,
+  deployedProgramId,
+)
+assert.deepEqual(extractCompiledSolanaIdl(embeddedCompiledIdl, deployedProgramId), {
+  ...compiledAccountIdl,
+  address: deployedProgramId,
+})
+assert.equal(extractCompiledSolanaIdl("const program = {};", deployedProgramId), undefined)
 const normalizedLegacyProgram = injectCompiledSolanaIdl(`
   const prog = new anchor.Program(IDL, PROGRAM_ID, anchorProvider);
   const imported = new Program(idl, new PublicKey("11111111111111111111111111111111"), provider);
@@ -245,6 +261,16 @@ const inferredPartialSignerAccount = inferredPartialSignerIdl.instructions[0].ac
 assert.equal(inferredPartialSignerAccount?.signer, true)
 
 const ipfsRoute = readFileSync(new URL("../app/ipfs/[cid]/route.ts", import.meta.url), "utf8")
-assert.match(ipfsRoute, /injectCompiledSolanaIdl\(programIdSource, solanaIdl, embeddedRuntime\.contractAddress\)/)
+assert.match(ipfsRoute, /recoveredSolanaIdl = compiledRuntime\.solanaIdl \|\| recoveredSolanaIdl/)
+assert.match(ipfsRoute, /extractCompiledSolanaIdl\(dapp\.frontend_code, dapp\.contract_address\)/)
+
+const frontendShell = readFileSync(new URL("../lib/frontend-shell.ts", import.meta.url), "utf8")
+assert.match(frontendShell, /extractCompiledSolanaIdl\(prepared\.source, contractAddress\) \|\| inferLegacySolanaIdl/)
+
+const deployWorker = readFileSync(new URL("../lib/solana-deploy-worker.ts", import.meta.url), "utf8")
+assert.ok(
+  deployWorker.indexOf("frontend_code: frontendCode") < deployWorker.lastIndexOf("completeSolanaDeployJob"),
+  "The compiled IDL must be persisted before a Solana deploy job becomes visible as confirmed",
+)
 
 console.log("Solana frontend runtime compatibility checks passed")
