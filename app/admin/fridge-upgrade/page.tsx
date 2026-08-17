@@ -61,7 +61,6 @@ export default function FridgeUpgradePage() {
   async function inspect() {
     setBusy(true)
     try {
-      await ownerWallet()
       setStatus("Compiling the Token-2022 program and checking Mainnet ProgramData capacity…")
       const next = await request("quote")
       setQuote(next)
