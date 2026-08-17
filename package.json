@@ -18,6 +18,7 @@
     "qa:evm-factory": "node scripts/verify-deployment-factory.mjs",
     "qa:solana-cluster": "node scripts/qa-solana-cluster-funding.mjs",
     "qa:solana-frontend": "node --no-warnings --experimental-strip-types scripts/qa-solana-frontend-runtime.mts",
+    "qa:solana-generation": "node --no-warnings --experimental-strip-types scripts/qa-solana-generation-safety.mts",
     "qa:preview-runtime": "node scripts/qa-preview-runtime.mjs"
   },
   "dependencies": {
