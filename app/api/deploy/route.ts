@@ -34,7 +34,7 @@ export async function POST(request: Request) {
     const profile = user.isDemo ? { credits: localCredits(user.id), plan: "free" } : await getCredits(user.id)
     const activePro = hasActivePro(profile)
     const localDapp = user.isDemo ? localGetDapp(input.dappId) : undefined
-    const rows = user.isDemo ? [] : await supabaseRequest<{ name: string; frontend_code: string | null; contract_code: string | null; source_bundle_path: string | null; source_bundle_hash: string | null; chain: string; contract_address: string | null; contract_chain_id: number | null }[]>({ path: "dapps", query: { id: `eq.${input.dappId}`, owner_id: `eq.${user.id}`, select: "name,frontend_code,contract_code,source_bundle_path,source_bundle_hash,chain,contract_address,contract_chain_id", limit: "1" } })
+    const rows = user.isDemo ? [] : await supabaseRequest<{ name: string; frontend_code: string | null; contract_code: string | null; source_bundle_path: string | null; source_bundle_hash: string | null; chain: string; contract_address: string | null; contract_chain_id: number | null; contract_network: string | null }[]>({ path: "dapps", query: { id: `eq.${input.dappId}`, owner_id: `eq.${user.id}`, select: "name,frontend_code,contract_code,source_bundle_path,source_bundle_hash,chain,contract_address,contract_chain_id,contract_network", limit: "1" } })
     if (!user.isDemo && !rows[0]) throw new Error("dApp not found")
     const storedDapp = rows[0] ? await hydrateDappSources(rows[0]) : undefined
     let frontendCode = user.isDemo ? localDapp?.frontend_code || input.frontendCode : storedDapp?.frontend_code
@@ -92,7 +92,11 @@ export async function POST(request: Request) {
     }
     if (chain === "solana") {
       if (!input.solanaCluster) throw new Error("Seleziona il cluster Solana usato per il deploy")
+      const storedCluster = localDapp?.contract_network || storedDapp?.contract_network
+      if (storedCluster && storedCluster !== input.solanaCluster) throw new Error("The selected Solana cluster does not match the verified program deployment")
       await verifySolanaProgramDeployment({ programId: contractAddress, cluster: input.solanaCluster })
+      if (user.isDemo && localDapp) localUpdateDapp(input.dappId, { contract_network: input.solanaCluster })
+      else if (!user.isDemo && !storedCluster) await supabaseRequest({ path: "dapps", method: "PATCH", query: { id: `eq.${input.dappId}`, owner_id: `eq.${user.id}` }, body: { contract_network: input.solanaCluster, updated_at: new Date().toISOString() } })
     }
     const creditsRemaining = freeDeployment ? profile.credits
       : user.isDemo ? localSpend(user.id, CREDIT_COSTS.deploy)

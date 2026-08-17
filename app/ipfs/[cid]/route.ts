@@ -8,6 +8,7 @@ import { supabaseRequest } from "@/lib/supabase"
 import { hydrateDappSources } from "@/lib/source-storage"
 import { buildSolanaRuntimeCompatibilityScript, extractCompiledSolanaIdl, inferLegacySolanaIdl, injectCompiledSolanaIdl, replaceSolanaProgramId, wrapSolanaBabelSource, type SolanaIdl } from "@/lib/solana-frontend"
 import { fetchIpfsContent } from "@/lib/ipfs-gateway"
+import { detectSolanaProgramCluster, type SolanaDeploymentCluster } from "@/lib/solana-deployment"
 
 export const dynamic = "force-dynamic"
 
@@ -27,6 +28,12 @@ type StoredFrontendDapp = {
   contract_network: string | null
 }
 
+async function resolveSolanaCluster(dapp: Pick<StoredFrontendDapp, "contract_address" | "contract_network">) {
+  if (dapp.contract_network === "devnet" || dapp.contract_network === "mainnet-beta") return dapp.contract_network
+  if (!dapp.contract_address) return undefined
+  return detectSolanaProgramCluster(dapp.contract_address)
+}
+
 function inferLegacySolanaCluster(html: string) {
   if (/api\.devnet\.solana\.com|clusterApiUrl\s*\(\s*["']devnet["']\s*\)/i.test(html)) return "devnet" as const
   if (/api\.mainnet-beta\.solana\.com|clusterApiUrl\s*\(\s*["']mainnet-beta["']\s*\)/i.test(html)) return "mainnet-beta" as const
@@ -43,8 +50,9 @@ async function compiledRuntimeForCid(cid: string) {
   const dapp = rows[0] ? await hydrateDappSources(rows[0]) : undefined
   if (!dapp) return {}
   if (dapp.chain === "solana") {
+    const solanaCluster = await resolveSolanaCluster(dapp)
     const runtime: CompiledRuntime = {
-      solanaCluster: dapp.contract_network === "mainnet-beta" ? "mainnet-beta" as const : "devnet" as const,
+      solanaCluster,
       solanaIdl: dapp.frontend_code && dapp.contract_address
         ? extractCompiledSolanaIdl(dapp.frontend_code, dapp.contract_address)
         : undefined,
@@ -79,8 +87,8 @@ async function rebuiltFrontendForCid(cid: string) {
     ? compileSolidity(stored.contract_code, stored.name, { chainId }).abi
     : undefined
   const frontendCode = abi ? injectCompiledAbiIntoFrontend(stored.frontend_code, abi) : stored.frontend_code
-  const solanaCluster = stored.chain === "solana"
-    ? stored.contract_network === "mainnet-beta" ? "mainnet-beta" as const : "devnet" as const
+  const solanaCluster: SolanaDeploymentCluster | undefined = stored.chain === "solana"
+    ? await resolveSolanaCluster(stored)
     : undefined
   const clusterAwareHtml = buildHTMLShell(frontendCode, stored.contract_address, stored.chain, false, abi, chainId, solanaCluster)
   const legacyHtml = solanaCluster
@@ -151,7 +159,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ cid
         evmChainId = compiledRuntime.chainId
         if (embeddedRuntime?.chain === "solana") {
           recoveredSolanaIdl = compiledRuntime.solanaIdl || recoveredSolanaIdl
-          solanaCompatibility = buildSolanaRuntimeCompatibilityScript(recoveredSolanaIdl, legacySolanaCluster || compiledRuntime.solanaCluster)
+          solanaCompatibility = buildSolanaRuntimeCompatibilityScript(recoveredSolanaIdl, compiledRuntime.solanaCluster || legacySolanaCluster)
         }
         if (contractAbi) html = injectCompiledAbiIntoFrontend(html, contractAbi)
       } catch {

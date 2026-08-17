@@ -26,3 +26,10 @@ export async function verifySolanaProgramDeployment(input: { programId: string; 
   if (!account.executable) throw new Error("L'account indicato esiste, ma non è un programma Solana eseguibile")
   return { programId: publicKey.toBase58(), cluster: input.cluster, status: "confirmed" as const }
 }
+
+export async function detectSolanaProgramCluster(programId: string) {
+  const clusters: SolanaDeploymentCluster[] = ["mainnet-beta", "devnet"]
+  const results = await Promise.allSettled(clusters.map(cluster => verifySolanaProgramDeployment({ programId, cluster })))
+  const matches = clusters.filter((_, index) => results[index].status === "fulfilled")
+  return matches.length === 1 ? matches[0] : undefined
+}

@@ -712,14 +712,14 @@ export function PromptBuilder() {
         }
       }
       if (savedPending?.dappId) {
-        if (savedPending.prompt !== requestedPrompt || savedPending.chain !== requestedChain || savedPending.evmChainId !== requestedEvmChainId) {
+        if (savedPending.prompt !== requestedPrompt || savedPending.chain !== requestedChain || savedPending.evmChainId !== requestedEvmChainId || savedPending.solanaCluster !== requestedSolanaCluster) {
           throw new Error("Another generation is still pending. Wait for Dappster to recover it before starting a different project.")
         }
         prepared = { ...savedPending, creditBurn }
       } else {
         const created = await apiFetch<Array<{ id: string }>>("/api/dapps", {
           method: "POST",
-          body: JSON.stringify({ name: "Generating dApp", description: requestedPrompt, chain: requestedChain, tags: [] }),
+          body: JSON.stringify({ name: "Generating dApp", description: requestedPrompt, chain: requestedChain, contract_network: requestedSolanaCluster, tags: [] }),
           signal: controller.signal,
         })
         if (!created[0]?.id) throw new Error("Dappster could not prepare a recoverable generation")
