@@ -13,6 +13,7 @@ const frontend = `
 
 const safeProgram = `
 use anchor_lang::prelude::*;
+use anchor_spl::token_interface::{self, Mint, TokenAccount, TokenInterface, TransferChecked};
 
 #[program]
 pub mod fridge {
@@ -21,13 +22,14 @@ pub mod fridge {
     pub fn withdraw(ctx: Context<Withdraw>) -> Result<()> {
         let seeds = &[b"config".as_ref(), &[ctx.bumps.config]];
         let signer = &[&seeds[..]];
-        let cpi_accounts = Transfer {
+        let cpi_accounts = TransferChecked {
             from: ctx.accounts.vault.to_account_info(),
             to: ctx.accounts.destination.to_account_info(),
             authority: ctx.accounts.config.to_account_info(),
+            mint: ctx.accounts.mint.to_account_info(),
         };
         let cpi_ctx = CpiContext::new_with_signer(ctx.accounts.token_program.to_account_info(), cpi_accounts, signer);
-        token::transfer(cpi_ctx, 1)?;
+        token_interface::transfer_checked(cpi_ctx, 1, ctx.accounts.mint.decimals)?;
         Ok(())
     }
 }
@@ -37,10 +39,11 @@ pub struct Withdraw<'info> {
     #[account(seeds = [b"config"], bump)]
     pub config: Account<'info, Config>,
     #[account(mut)]
-    pub vault: Account<'info, TokenAccount>,
+    pub vault: InterfaceAccount<'info, TokenAccount>,
     #[account(mut)]
-    pub destination: Account<'info, TokenAccount>,
-    pub token_program: Program<'info, Token>,
+    pub destination: InterfaceAccount<'info, TokenAccount>,
+    pub mint: InterfaceAccount<'info, Mint>,
+    pub token_program: Interface<'info, TokenInterface>,
 }
 
 #[derive(Accounts)]
@@ -133,5 +136,32 @@ assert.doesNotMatch(
   /case-sensitive|solanaRpcUrl/,
 )
 assert.deepEqual(solanaContractSafetyIssues(safeProgram), [])
+
+const legacyOnlyProgram = safeProgram
+  .replace('use anchor_spl::token_interface::{self, Mint, TokenAccount, TokenInterface, TransferChecked};', 'use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer};')
+  .replaceAll("InterfaceAccount<'info,", "Account<'info,")
+  .replace("Interface<'info, TokenInterface>", "Program<'info, Token>")
+assert.match(
+  solanaContractSafetyIssues(legacyOnlyProgram).join("\n"),
+  /both the legacy Token Program and Token-2022/,
+)
+assert.match(
+  solanaFrontendSafetyIssues(`
+    const { TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } = window.__DAPPSTER__.spl;
+    const ata = getAssociatedTokenAddressSync(mint, wallet);
+    await program.methods.deposit().accounts({ tokenProgram: TOKEN_PROGRAM_ID }).rpc();
+  `).join("\n"),
+  /hardcodes the legacy TOKEN_PROGRAM_ID/,
+)
+assert.doesNotMatch(
+  solanaFrontendSafetyIssues(`
+    const { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddressSync } = window.__DAPPSTER__.spl;
+    const mintAccount = await connection.getAccountInfo(mint);
+    const tokenProgramId = mintAccount.owner;
+    if (!tokenProgramId.equals(TOKEN_PROGRAM_ID) && !tokenProgramId.equals(TOKEN_2022_PROGRAM_ID)) throw new Error("Unsupported mint owner");
+    const ata = getAssociatedTokenAddressSync(mint, wallet, false, tokenProgramId);
+  `).join("\n"),
+  /hardcodes the legacy TOKEN_PROGRAM_ID/,
+)
 
 console.log("Solana generation safety checks passed")
