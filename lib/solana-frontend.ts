@@ -274,6 +274,10 @@ export function buildSolanaRuntimeCompatibilityScript(solanaIdl?: SolanaIdl) {
         window.Buffer = modules.Buffer;
         runtime.web3 = modules.web3;
         runtime.anchor = modules.anchor;
+        // Older generated Solana frontends use window.__DAPPSTER__.spl,
+        // while newer ones use splToken or the global window.splToken.
+        // Keep both aliases so immutable IPFS deployments remain executable.
+        runtime.spl = modules.splToken;
         runtime.splToken = modules.splToken;
         runtime.Buffer = modules.Buffer;
         Object.assign(window, modules.web3, modules.anchor, modules.splToken, modules.phantomWalletAdapter || {});
