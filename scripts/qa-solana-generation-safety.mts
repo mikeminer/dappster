@@ -108,6 +108,18 @@ assert.match(
   solanaFrontendSafetyIssues(`import { PhantomWalletAdapter } from "@solana/wallet-adapter-phantom"`).join("\n"),
   /requires a bundler/,
 )
+assert.match(
+  solanaFrontendSafetyIssues(`await program.methods.launch(Number(amount)).rpc()`).join("\n"),
+  /must use anchor\.BN/,
+)
+assert.match(
+  solanaFrontendSafetyIssues(`await program.methods.launch(BigInt(amount)).rpc()`).join("\n"),
+  /must use anchor\.BN/,
+)
+assert.doesNotMatch(
+  solanaFrontendSafetyIssues(`await program.methods.launch(new anchor.BN(String(amount))).rpc()`).join("\n"),
+  /must use anchor\.BN/,
+)
 assert.deepEqual(solanaContractSafetyIssues(safeProgram), [])
 
 console.log("Solana generation safety checks passed")

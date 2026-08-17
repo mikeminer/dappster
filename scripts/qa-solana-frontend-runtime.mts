@@ -12,14 +12,14 @@ const runtime = buildSolanaRuntimeCompatibilityScript()
 assert.doesNotThrow(() => new Function(runtime))
 assert.match(runtime, /window\.__DAPPSTER_SOLANA_RUNTIME__/)
 assert.match(runtime, /modules\.phantomWalletAdapter \|\| \{\}/)
-assert.match(runtime, /Object\.assign\(window, modules\.web3, modules\.anchor, modules\.splToken/)
+assert.match(runtime, /Object\.assign\(window, modules\.web3, anchorRuntime, modules\.splToken/)
 assert.match(runtime, /runtime\.preview && window\.PublicKey/)
 assert.match(runtime, /Replaced an invalid Solana public key/)
 assert.match(runtime, /11111111111111111111111111111111/)
 assert.match(runtime, /window\.SolanaWeb3 = modules\.web3/)
 assert.match(runtime, /window\.anchorWeb3 = modules\.web3/)
 assert.match(runtime, /runtime\.web3 = modules\.web3/)
-assert.match(runtime, /runtime\.anchor = modules\.anchor/)
+assert.match(runtime, /runtime\.anchor = anchorRuntime/)
 assert.match(runtime, /runtime\.spl = modules\.splToken/)
 assert.match(runtime, /runtime\.splToken = modules\.splToken/)
 assert.match(runtime, /const previewProvider = \{/)
@@ -50,12 +50,66 @@ new Function("window", runtime)(previewWindow)
 await previewWindow.__DAPPSTER_SOLANA_READY__
 assert.equal(previewWindow.phantom.solana.isPhantom, true)
 assert.equal(previewWindow.__DAPPSTER__.web3, previewWindow.__DAPPSTER_SOLANA_RUNTIME__.web3)
-assert.equal(previewWindow.__DAPPSTER__.anchor, previewWindow.__DAPPSTER_SOLANA_RUNTIME__.anchor)
+assert.equal(previewWindow.__DAPPSTER__.anchor.web3, previewWindow.__DAPPSTER_SOLANA_RUNTIME__.anchor.web3)
 assert.equal(previewWindow.__DAPPSTER__.spl, previewWindow.__DAPPSTER_SOLANA_RUNTIME__.splToken)
 assert.equal(previewWindow.__DAPPSTER__.splToken, previewWindow.__DAPPSTER_SOLANA_RUNTIME__.splToken)
 assert.equal(previewWindow.solana, previewWindow.phantom.solana)
 assert.equal((await previewWindow.solana.connect()).publicKey.toBase58(), "11111111111111111111111111111111")
 await assert.rejects(() => previewWindow.solana.signTransaction({}), /Wallet signing is disabled/)
+
+class MockBN {
+  value: string
+  constructor(value: unknown) { this.value = String(value) }
+  toArrayLike() { return this.value }
+}
+class MockProgram {
+  methods = {
+    initializeLaunchpad: (...args: unknown[]) => args,
+    launch: (...args: unknown[]) => args,
+  }
+}
+const numericIdl = {
+  instructions: [
+    {
+      name: "initialize_launchpad",
+      args: [
+        { name: "cap", type: "u64" },
+        { name: "decimals", type: "u8" },
+        { name: "label", type: "string" },
+      ],
+    },
+    { name: "launch", args: [{ name: "amount", type: "u64" }] },
+  ],
+}
+const numericWindow: Record<string, any> = {
+  __DAPPSTER__: { chain: "solana", preview: false, solanaIdl: numericIdl },
+  __DAPPSTER_SOLANA_RUNTIME__: {
+    web3: { PublicKey: MockPublicKey },
+    anchor: { web3: { PublicKey: MockPublicKey }, BN: MockBN, Program: MockProgram },
+    splToken: {},
+    Buffer: Uint8Array,
+    phantomWalletAdapter: {},
+  },
+}
+new Function("window", runtime)(numericWindow)
+await numericWindow.__DAPPSTER_SOLANA_READY__
+const compatibleProgram = new numericWindow.anchor.Program(numericIdl, {})
+const initializeArgs = compatibleProgram.methods.initializeLaunchpad("1000000000", "9", "coffee")
+assert.ok(initializeArgs[0] instanceof MockBN)
+assert.equal(initializeArgs[0].value, "1000000000")
+assert.equal(initializeArgs[1], 9)
+assert.equal(initializeArgs[2], "coffee")
+const launchArgs = compatibleProgram.methods.launch(1000000)
+assert.ok(launchArgs[0] instanceof MockBN)
+assert.equal(launchArgs[0].value, "1000000")
+const existingBn = new MockBN("42")
+assert.equal(compatibleProgram.methods.launch(existingBn)[0], existingBn)
+assert.throws(
+  () => compatibleProgram.methods.launch(Number.MAX_SAFE_INTEGER + 1),
+  /exceeds JavaScript's safe integer range/,
+)
+assert.throws(() => compatibleProgram.methods.launch("1.5"), /must be a valid u64 integer/)
+assert.throws(() => compatibleProgram.methods.launch("-1"), /must be a valid u64 integer/)
 
 const aliases = buildSolanaImportAliases(`
   import * as SolanaWeb3 from "@solana/web3.js"

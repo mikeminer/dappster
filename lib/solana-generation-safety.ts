@@ -196,6 +196,21 @@ function validateProgramConstruction(frontend: string) {
   return issues
 }
 
+function validateAnchorNumericArguments(frontend: string) {
+  const issues: string[] = []
+  const methodPattern = /\.methods\s*\.\s*[A-Za-z_$][\w$]*\s*\(/g
+  for (const match of Array.from(frontend.matchAll(methodPattern))) {
+    const argsStart = (match.index || 0) + match[0].length - 1
+    const argsEnd = matchingDelimiter(frontend, argsStart, "(", ")")
+    if (argsEnd < 0) continue
+    const args = splitTopLevelArguments(frontend.slice(argsStart + 1, argsEnd))
+    if (args.some(argument => /\b(?:Number|parseInt|parseFloat|BigInt)\s*\(/.test(argument))) {
+      issues.push("Anchor 64-bit integer instruction arguments must use anchor.BN instead of Number, parseInt, parseFloat, or BigInt")
+    }
+  }
+  return issues
+}
+
 export function solanaContractSafetyIssues(contract: string) {
   const issues = [
     ...validateAccountAllocation(contract),
@@ -208,7 +223,10 @@ export function solanaContractSafetyIssues(contract: string) {
 }
 
 export function solanaFrontendSafetyIssues(frontend: string) {
-  const issues = validateProgramConstruction(frontend)
+  const issues = [
+    ...validateProgramConstruction(frontend),
+    ...validateAnchorNumericArguments(frontend),
+  ]
   if (/new\s+(?:anchor\s*\.\s*)?Provider\s*\(/.test(frontend)) issues.push("Use AnchorProvider, not the removed legacy Provider")
   if (/\brequire\s*\(/.test(frontend)) issues.push("The frontend uses CommonJS require(), which cannot run in the browser preview")
   if (/(?:PhantomWalletAdapter|WalletMultiButton|WalletProvider|@solana\/wallet-adapter-(?:react|react-ui|phantom))/.test(frontend)) {
