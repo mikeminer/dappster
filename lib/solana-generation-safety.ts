@@ -91,10 +91,10 @@ function fixedRustTypeSize(typeSource: string): number | undefined {
 function fixedAccountSizes(contract: string) {
   const sizes = new Map<string, number>()
   const pattern = /#\s*\[\s*account\s*\]\s*(?:#\s*\[[^\]]+\]\s*)*pub\s+struct\s+([A-Za-z_$][\w$]*)\s*\{([\s\S]*?)\}/g
-  for (const match of contract.matchAll(pattern)) {
+  for (const match of Array.from(contract.matchAll(pattern))) {
     let size = 8
     let complete = true
-    const fields = match[2].matchAll(/^\s*pub\s+[A-Za-z_$][\w$]*\s*:\s*([^,\n]+),?/gm)
+    const fields = Array.from(match[2].matchAll(/^\s*pub\s+[A-Za-z_$][\w$]*\s*:\s*([^,\n]+),?/gm))
     for (const field of fields) {
       const fieldSize = fixedRustTypeSize(field[1])
       if (fieldSize === undefined) {
@@ -116,7 +116,7 @@ function numericSpace(expression: string) {
 function accountAttributes(contract: string) {
   const accounts: Array<{ name: string; type: string; attributes: string }> = []
   const fieldPattern = /pub\s+([A-Za-z_$][\w$]*)\s*:\s*(?:Box\s*<\s*)?Account\s*<'info\s*,\s*([A-Za-z_$][\w$]*)\s*>/g
-  for (const match of contract.matchAll(fieldPattern)) {
+  for (const match of Array.from(contract.matchAll(fieldPattern))) {
     const prefix = contract.slice(Math.max(0, (match.index || 0) - 1600), match.index)
     const start = prefix.lastIndexOf("#[account(")
     accounts.push({ name: match[1], type: match[2], attributes: start >= 0 ? prefix.slice(start) : "" })
@@ -152,7 +152,7 @@ function validatePdaCpiAuthorities(contract: string) {
   const issues: string[] = []
   const pdaSeeds = pdaSeedByAccount(contract)
   const functionPattern = /pub\s+fn\s+([A-Za-z_$][\w$]*)[^\{]*\{/g
-  for (const match of contract.matchAll(functionPattern)) {
+  for (const match of Array.from(contract.matchAll(functionPattern))) {
     const bodyStart = (match.index || 0) + match[0].length - 1
     const bodyEnd = matchingDelimiter(contract, bodyStart, "{", "}")
     if (bodyEnd < 0) continue
@@ -173,7 +173,7 @@ function validatePdaCpiAuthorities(contract: string) {
 function validateProgramConstruction(frontend: string) {
   const issues: string[] = []
   const pattern = /new\s+(?:anchor\s*\.\s*)?Program\s*\(/g
-  for (const match of frontend.matchAll(pattern)) {
+  for (const match of Array.from(frontend.matchAll(pattern))) {
     const argsStart = (match.index || 0) + match[0].length - 1
     const argsEnd = matchingDelimiter(frontend, argsStart, "(", ")")
     if (argsEnd < 0) continue
