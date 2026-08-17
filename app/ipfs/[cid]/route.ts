@@ -6,7 +6,7 @@ import { rawCidV1ForText } from "@/lib/ipfs-cid"
 import { compileSolidity } from "@/lib/solidity"
 import { supabaseRequest } from "@/lib/supabase"
 import { hydrateDappSources } from "@/lib/source-storage"
-import { buildSolanaRuntimeCompatibilityScript, inferLegacySolanaIdl, replaceSolanaProgramId, wrapSolanaBabelSource } from "@/lib/solana-frontend"
+import { buildSolanaRuntimeCompatibilityScript, inferLegacySolanaIdl, injectCompiledSolanaIdl, replaceSolanaProgramId, wrapSolanaBabelSource } from "@/lib/solana-frontend"
 import { fetchIpfsContent } from "@/lib/ipfs-gateway"
 
 export const dynamic = "force-dynamic"
@@ -103,8 +103,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ cid
           const babelPattern = /(<script type="text\/babel"[^>]*>)([\s\S]*?)(<\/script>)/
           const babel = babelPattern.exec(html)
           if (babel) {
-            const repairedSource = replaceSolanaProgramId(babel[2], embeddedRuntime.contractAddress)
-            const solanaIdl = inferLegacySolanaIdl(repairedSource, embeddedRuntime.contractAddress)
+            const programIdSource = replaceSolanaProgramId(babel[2], embeddedRuntime.contractAddress)
+            const solanaIdl = inferLegacySolanaIdl(programIdSource, embeddedRuntime.contractAddress)
+            const repairedSource = solanaIdl
+              ? injectCompiledSolanaIdl(programIdSource, solanaIdl, embeddedRuntime.contractAddress)
+              : programIdSource
             solanaCompatibility = buildSolanaRuntimeCompatibilityScript(solanaIdl)
             html = html.replace(babelPattern, `$1${wrapSolanaBabelSource(repairedSource)}$3`)
           }
