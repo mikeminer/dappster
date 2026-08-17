@@ -286,19 +286,103 @@ export function buildSolanaRuntimeCompatibilityScript(solanaIdl?: SolanaIdl) {
         if (!modules || !modules.web3 || !modules.anchor || !modules.splToken || !modules.Buffer) {
           throw new Error("The self-hosted Solana runtime did not load");
         }
+        const anchorRuntime = Object.assign({}, modules.anchor);
+        const anchorDefault = modules.anchor.default && typeof modules.anchor.default === "object"
+          ? Object.assign({}, modules.anchor.default)
+          : anchorRuntime;
+        const OriginalProgram = modules.anchor.Program || anchorDefault.Program;
+        const AnchorBN = modules.anchor.BN || anchorDefault.BN;
+        const normalizeInstructionName = function (value) {
+          return String(value || "").replace(/_/g, "").toLowerCase();
+        };
+        const normalizeAnchorInteger = function (value, type, label) {
+          if (value === null || value === undefined) return value;
+          if (typeof type === "string") {
+            if (/^[ui](?:64|128|256)$/.test(type)) {
+              if (value && typeof value.toArrayLike === "function") return value;
+              if (!AnchorBN) throw new Error("Anchor BN is unavailable for " + label);
+              if (typeof value === "number" && !Number.isSafeInteger(value)) {
+                throw new Error(label + " exceeds JavaScript's safe integer range; enter it as digits");
+              }
+              const encoded = String(value).trim();
+              if (!/^-?\\d+$/.test(encoded) || (type[0] === "u" && encoded[0] === "-")) {
+                throw new Error(label + " must be a valid " + type + " integer");
+              }
+              return new AnchorBN(encoded, 10);
+            }
+            if (/^[ui](?:8|16|32)$/.test(type) && typeof value === "string" && /^-?\\d+$/.test(value.trim())) {
+              return Number(value);
+            }
+            return value;
+          }
+          if (!type || typeof type !== "object") return value;
+          if (Object.prototype.hasOwnProperty.call(type, "option")) {
+            return normalizeAnchorInteger(value, type.option, label);
+          }
+          if (Object.prototype.hasOwnProperty.call(type, "vec") && Array.isArray(value)) {
+            return value.map(function (entry, index) {
+              return normalizeAnchorInteger(entry, type.vec, label + "[" + index + "]");
+            });
+          }
+          if (Array.isArray(type.array) && Array.isArray(value)) {
+            return value.map(function (entry, index) {
+              return normalizeAnchorInteger(entry, type.array[0], label + "[" + index + "]");
+            });
+          }
+          return value;
+        };
+        const wrapProgram = function (program, idl) {
+          if (!program || !program.methods || !idl || !Array.isArray(idl.instructions)) return program;
+          const instructionByName = new Map(idl.instructions.map(function (instruction) {
+            return [normalizeInstructionName(instruction && instruction.name), instruction];
+          }));
+          const methods = new Proxy(program.methods, {
+            get(target, property, receiver) {
+              const method = Reflect.get(target, property, receiver);
+              if (typeof property !== "string" || typeof method !== "function") return method;
+              const instruction = instructionByName.get(normalizeInstructionName(property));
+              if (!instruction || !Array.isArray(instruction.args)) return method.bind(target);
+              return function () {
+                const args = Array.from(arguments).map(function (argument, index) {
+                  const specification = instruction.args[index];
+                  return specification
+                    ? normalizeAnchorInteger(argument, specification.type, instruction.name + "." + specification.name)
+                    : argument;
+                });
+                return method.apply(target, args);
+              };
+            },
+          });
+          return new Proxy(program, {
+            get(target, property, receiver) {
+              if (property === "methods") return methods;
+              return Reflect.get(target, property, receiver);
+            },
+          });
+        };
+        if (OriginalProgram && AnchorBN) {
+          const CompatibleProgram = new Proxy(OriginalProgram, {
+            construct(target, args) {
+              return wrapProgram(Reflect.construct(target, args, target), args[0] || runtime.solanaIdl);
+            },
+          });
+          anchorRuntime.Program = CompatibleProgram;
+          anchorDefault.Program = CompatibleProgram;
+        }
+        anchorRuntime.default = anchorDefault;
         window.Buffer = modules.Buffer;
         runtime.web3 = modules.web3;
-        runtime.anchor = modules.anchor;
+        runtime.anchor = anchorRuntime;
         // Older generated Solana frontends use window.__DAPPSTER__.spl,
         // while newer ones use splToken or the global window.splToken.
         // Keep both aliases so immutable IPFS deployments remain executable.
         runtime.spl = modules.splToken;
         runtime.splToken = modules.splToken;
         runtime.Buffer = modules.Buffer;
-        Object.assign(window, modules.web3, modules.anchor, modules.splToken, modules.phantomWalletAdapter || {});
+        Object.assign(window, modules.web3, anchorRuntime, modules.splToken, modules.phantomWalletAdapter || {});
         window.solanaWeb3 = modules.web3;
         window.SolanaWeb3 = modules.web3;
-        window.anchor = modules.anchor;
+        window.anchor = anchorRuntime;
         window.splToken = modules.splToken;
         window.phantomWalletAdapter = modules.phantomWalletAdapter || {};
         window.web3 = modules.web3;
