@@ -220,6 +220,29 @@ export function inferLegacySolanaIdl(frontendSource: string, programId: string):
   }
 }
 
+/**
+ * Reads the compiler-generated Anchor IDL embedded by the Solana build worker.
+ * The compatibility IDL is intentionally only a last resort: replacing a full
+ * IDL with it removes account layouts and makes `program.account.*` unusable.
+ */
+export function extractCompiledSolanaIdl(frontendSource: string, programId?: string): SolanaIdl | undefined {
+  const markerIndex = frontendSource.indexOf(SOLANA_RUNTIME_MARKER)
+  if (markerIndex < 0) return undefined
+  const idlKeyIndex = frontendSource.indexOf("solanaIdl", markerIndex)
+  if (idlKeyIndex < 0) return undefined
+  const objectStart = frontendSource.indexOf("{", idlKeyIndex)
+  if (objectStart < 0) return undefined
+  const objectEnd = matchingDelimiter(frontendSource, objectStart, "{", "}")
+  if (objectEnd < 0) return undefined
+  try {
+    const parsed = JSON.parse(frontendSource.slice(objectStart, objectEnd + 1)) as SolanaIdl
+    if (!parsed || !Array.isArray(parsed.instructions)) return undefined
+    return programId ? { ...parsed, address: programId } : parsed
+  } catch {
+    return undefined
+  }
+}
+
 export function injectCompiledSolanaIdl(frontendSource: string, idl: SolanaIdl, programId: string) {
   const encoded = JSON.stringify({ ...idl, address: programId }).replace(/</g, "\\u003c")
   let source = replaceSolanaProgramId(frontendSource, programId)

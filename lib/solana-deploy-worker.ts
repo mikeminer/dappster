@@ -57,13 +57,16 @@ export async function processClaimedSolanaDeployJob(job: SolanaDeployJob, worker
       job.program_id = deployed.programId
     }
     await verifySolanaProgramDeployment({ programId: deployed.programId, cluster: job.cluster })
-    await completeSolanaDeployJob(job.id, workerToken, deployed.programId, isDemo)
     const deployedAt = new Date().toISOString()
     const frontendCode = dapp.frontend_code
       ? injectCompiledSolanaIdl(dapp.frontend_code, built.idl, deployed.programId)
       : undefined
     if (localDapp) localUpdateDapp(job.dapp_id, { contract_address: deployed.programId, contract_deployed_at: deployedAt, deploy_status: "draft", ...(frontendCode ? { frontend_code: frontendCode } : {}) })
     else await supabaseRequest({ path: "dapps", method: "PATCH", query: { id: `eq.${job.dapp_id}`, owner_id: `eq.${job.owner_id}` }, body: { contract_address: deployed.programId, contract_deployed_at: deployedAt, deploy_status: "draft", ...(frontendCode ? { frontend_code: frontendCode } : {}), updated_at: deployedAt } })
+    // Publish the completed job only after the compiler IDL and final Program
+    // ID are durable. Otherwise the client can pin a frontend in the small
+    // window between job confirmation and this database update.
+    await completeSolanaDeployJob(job.id, workerToken, deployed.programId, isDemo)
     return { programId: deployed.programId, payer: deployed.payer, byteLength: built.byteLength }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Deploy Solana non riuscito"
