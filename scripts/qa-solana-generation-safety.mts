@@ -120,6 +120,18 @@ assert.doesNotMatch(
   solanaFrontendSafetyIssues(`await program.methods.launch(new anchor.BN(String(amount))).rpc()`).join("\n"),
   /must use anchor\.BN/,
 )
+assert.match(
+  solanaFrontendSafetyIssues(`const mint = new PublicKey(mintAddress.toLowerCase())`).join("\n"),
+  /case-sensitive/,
+)
+assert.match(
+  solanaFrontendSafetyIssues(`const connection = new Connection(clusterApiUrl("devnet"))`).join("\n"),
+  /solanaRpcUrl/,
+)
+assert.doesNotMatch(
+  solanaFrontendSafetyIssues(`const mint = new PublicKey(mintAddress.trim()); const connection = new Connection(window.__DAPPSTER__.solanaRpcUrl, "confirmed")`).join("\n"),
+  /case-sensitive|solanaRpcUrl/,
+)
 assert.deepEqual(solanaContractSafetyIssues(safeProgram), [])
 
 console.log("Solana generation safety checks passed")

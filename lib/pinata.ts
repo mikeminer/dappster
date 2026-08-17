@@ -2,9 +2,9 @@ import { ipfsGatewayUrl } from "@/lib/ipfs"
 import { buildHTMLShell } from "@/lib/frontend-shell"
 import type { Abi } from "viem"
 
-export async function deployFrontendToIPFS(dappId: string, frontendCode: string, contractAddress: string, chain: string, contractAbi?: Abi, evmChainId?: number) {
+export async function deployFrontendToIPFS(dappId: string, frontendCode: string, contractAddress: string, chain: string, contractAbi?: Abi, evmChainId?: number, solanaCluster?: "devnet" | "mainnet-beta") {
   if (!process.env.PINATA_JWT) throw new Error("PINATA_JWT is not configured")
-  const html = buildHTMLShell(frontendCode, contractAddress, chain, false, contractAbi, evmChainId)
+  const html = buildHTMLShell(frontendCode, contractAddress, chain, false, contractAbi, evmChainId, solanaCluster)
   const form = new FormData()
   form.append("file", new Blob([html], { type: "text/html" }), "index.html")
   form.append("network", "public")

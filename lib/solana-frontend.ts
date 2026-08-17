@@ -269,14 +269,18 @@ export function replaceSolanaProgramId(frontendSource: string, programId: string
   )
 }
 
-export function buildSolanaRuntimeCompatibilityScript(solanaIdl?: SolanaIdl) {
+export function buildSolanaRuntimeCompatibilityScript(solanaIdl?: SolanaIdl, solanaCluster?: "devnet" | "mainnet-beta") {
   const idlAssignment = solanaIdl
     ? `runtime.solanaIdl = ${JSON.stringify(solanaIdl).replace(/</g, "\\u003c")};`
+    : ""
+  const clusterAssignment = solanaCluster
+    ? `runtime.solanaCluster = ${JSON.stringify(solanaCluster)}; runtime.solanaRpcUrl = ${JSON.stringify(solanaCluster === "devnet" ? "https://api.devnet.solana.com" : "https://api.mainnet-beta.solana.com")};`
     : ""
   return `
     (function () {
       const runtime = window.__DAPPSTER__ || {};
       ${idlAssignment}
+      ${clusterAssignment}
       if (runtime.chain !== "solana") {
         window.__DAPPSTER_SOLANA_READY__ = Promise.resolve();
         return;
@@ -292,6 +296,20 @@ export function buildSolanaRuntimeCompatibilityScript(solanaIdl?: SolanaIdl) {
           : anchorRuntime;
         const OriginalProgram = modules.anchor.Program || anchorDefault.Program;
         const AnchorBN = modules.anchor.BN || anchorDefault.BN;
+        const web3Runtime = Object.assign({}, modules.web3);
+        const OriginalConnection = modules.web3.Connection;
+        if (OriginalConnection && runtime.solanaRpcUrl) {
+          const ClusterBoundConnection = new Proxy(OriginalConnection, {
+            construct(target, args) {
+              const nextArgs = Array.from(args);
+              nextArgs[0] = runtime.solanaRpcUrl;
+              return Reflect.construct(target, nextArgs, target);
+            },
+          });
+          web3Runtime.Connection = ClusterBoundConnection;
+        }
+        anchorRuntime.web3 = web3Runtime;
+        anchorDefault.web3 = web3Runtime;
         const normalizeInstructionName = function (value) {
           return String(value || "").replace(/_/g, "").toLowerCase();
         };
@@ -371,7 +389,7 @@ export function buildSolanaRuntimeCompatibilityScript(solanaIdl?: SolanaIdl) {
         }
         anchorRuntime.default = anchorDefault;
         window.Buffer = modules.Buffer;
-        runtime.web3 = modules.web3;
+        runtime.web3 = web3Runtime;
         runtime.anchor = anchorRuntime;
         // Older generated Solana frontends use window.__DAPPSTER__.spl,
         // while newer ones use splToken or the global window.splToken.
@@ -379,14 +397,29 @@ export function buildSolanaRuntimeCompatibilityScript(solanaIdl?: SolanaIdl) {
         runtime.spl = modules.splToken;
         runtime.splToken = modules.splToken;
         runtime.Buffer = modules.Buffer;
-        Object.assign(window, modules.web3, anchorRuntime, modules.splToken, modules.phantomWalletAdapter || {});
-        window.solanaWeb3 = modules.web3;
-        window.SolanaWeb3 = modules.web3;
+        runtime.assertSolanaAccount = async function (connection, address, label) {
+          const accountLabel = label || "Solana account";
+          let publicKey;
+          try {
+            publicKey = address instanceof web3Runtime.PublicKey ? address : new web3Runtime.PublicKey(String(address || "").trim());
+          } catch {
+            throw new Error(accountLabel + " is not a valid Solana address. Addresses are case-sensitive; paste the original value without changing capitalization.");
+          }
+          const account = await connection.getAccountInfo(publicKey, "confirmed");
+          if (!account) {
+            const clusterLabel = runtime.solanaCluster === "mainnet-beta" ? "Mainnet" : "Devnet";
+            throw new Error(accountLabel + " does not exist on Solana " + clusterLabel + ". Use an address created on the same cluster as this dApp.");
+          }
+          return account;
+        };
+        Object.assign(window, web3Runtime, anchorRuntime, modules.splToken, modules.phantomWalletAdapter || {});
+        window.solanaWeb3 = web3Runtime;
+        window.SolanaWeb3 = web3Runtime;
         window.anchor = anchorRuntime;
         window.splToken = modules.splToken;
         window.phantomWalletAdapter = modules.phantomWalletAdapter || {};
-        window.web3 = modules.web3;
-        window.anchorWeb3 = modules.web3;
+        window.web3 = web3Runtime;
+        window.anchorWeb3 = web3Runtime;
         if (runtime.solanaIdl) window.idl = runtime.solanaIdl;
         if (runtime.preview && window.PublicKey) {
           const OriginalPublicKey = window.PublicKey;

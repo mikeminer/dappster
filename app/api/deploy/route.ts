@@ -100,7 +100,7 @@ export async function POST(request: Request) {
     if (user.isDemo && localDapp) localUpdateDapp(input.dappId, { deploy_status: "deploying", frontend_code: frontendCode })
     else if (!user.isDemo) await supabaseRequest({ path: "dapps", method: "PATCH", query: { id: `eq.${input.dappId}`, owner_id: `eq.${user.id}` }, body: { deploy_status: "deploying", frontend_code: frontendCode } })
     try {
-      const deployed = await deployFrontendToIPFS(input.dappId, frontendCode, contractAddress, chain, contractAbi, evmChainId)
+      const deployed = await deployFrontendToIPFS(input.dappId, frontendCode, contractAddress, chain, contractAbi, evmChainId, chain === "solana" ? input.solanaCluster : undefined)
       if (user.isDemo && localDapp) localUpdateDapp(input.dappId, { ipfs_hash: deployed.cid, ipfs_url: deployed.url, deploy_status: "live" })
       else if (!user.isDemo) await supabaseRequest({ path: "dapps", method: "PATCH", query: { id: `eq.${input.dappId}`, owner_id: `eq.${user.id}` }, body: { ipfs_hash: deployed.cid, ipfs_url: deployed.url, deploy_status: "live", updated_at: new Date().toISOString() } })
       revalidateTag("public-dapps")

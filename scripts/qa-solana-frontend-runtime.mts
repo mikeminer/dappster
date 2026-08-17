@@ -12,13 +12,13 @@ const runtime = buildSolanaRuntimeCompatibilityScript()
 assert.doesNotThrow(() => new Function(runtime))
 assert.match(runtime, /window\.__DAPPSTER_SOLANA_RUNTIME__/)
 assert.match(runtime, /modules\.phantomWalletAdapter \|\| \{\}/)
-assert.match(runtime, /Object\.assign\(window, modules\.web3, anchorRuntime, modules\.splToken/)
+assert.match(runtime, /Object\.assign\(window, web3Runtime, anchorRuntime, modules\.splToken/)
 assert.match(runtime, /runtime\.preview && window\.PublicKey/)
 assert.match(runtime, /Replaced an invalid Solana public key/)
 assert.match(runtime, /11111111111111111111111111111111/)
-assert.match(runtime, /window\.SolanaWeb3 = modules\.web3/)
-assert.match(runtime, /window\.anchorWeb3 = modules\.web3/)
-assert.match(runtime, /runtime\.web3 = modules\.web3/)
+assert.match(runtime, /window\.SolanaWeb3 = web3Runtime/)
+assert.match(runtime, /window\.anchorWeb3 = web3Runtime/)
+assert.match(runtime, /runtime\.web3 = web3Runtime/)
 assert.match(runtime, /runtime\.anchor = anchorRuntime/)
 assert.match(runtime, /runtime\.spl = modules\.splToken/)
 assert.match(runtime, /runtime\.splToken = modules\.splToken/)
@@ -27,7 +27,7 @@ assert.match(runtime, /if \(!window\.phantom\.solana\) window\.phantom\.solana =
 assert.match(runtime, /if \(!window\.solana\) window\.solana = window\.phantom\.solana/)
 assert.match(runtime, /Wallet signing is disabled in the isolated Dappster preview/)
 assert.ok(
-  runtime.indexOf("window.Buffer = modules.Buffer") < runtime.indexOf("Object.assign(window, modules.web3"),
+  runtime.indexOf("window.Buffer = modules.Buffer") < runtime.indexOf("Object.assign(window, web3Runtime"),
   "Buffer must be available before the Phantom adapter module loads",
 )
 
@@ -36,10 +36,17 @@ class MockPublicKey {
   constructor(value: string) { this.value = value }
   toBase58() { return this.value }
 }
+class MockConnection {
+  endpoint: string
+  constructor(endpoint: string) { this.endpoint = endpoint }
+  async getAccountInfo(publicKey: MockPublicKey) {
+    return publicKey.value === "11111111111111111111111111111111" ? { executable: true } : null
+  }
+}
 const previewWindow: Record<string, any> = {
   __DAPPSTER__: { chain: "solana", preview: true },
   __DAPPSTER_SOLANA_RUNTIME__: {
-    web3: { PublicKey: MockPublicKey },
+    web3: { PublicKey: MockPublicKey, Connection: MockConnection },
     anchor: { web3: { PublicKey: MockPublicKey } },
     splToken: {},
     Buffer: Uint8Array,
@@ -49,13 +56,34 @@ const previewWindow: Record<string, any> = {
 new Function("window", runtime)(previewWindow)
 await previewWindow.__DAPPSTER_SOLANA_READY__
 assert.equal(previewWindow.phantom.solana.isPhantom, true)
-assert.equal(previewWindow.__DAPPSTER__.web3, previewWindow.__DAPPSTER_SOLANA_RUNTIME__.web3)
-assert.equal(previewWindow.__DAPPSTER__.anchor.web3, previewWindow.__DAPPSTER_SOLANA_RUNTIME__.anchor.web3)
+assert.notEqual(previewWindow.__DAPPSTER__.web3, previewWindow.__DAPPSTER_SOLANA_RUNTIME__.web3)
+assert.equal(previewWindow.__DAPPSTER__.anchor.web3, previewWindow.__DAPPSTER__.web3)
 assert.equal(previewWindow.__DAPPSTER__.spl, previewWindow.__DAPPSTER_SOLANA_RUNTIME__.splToken)
 assert.equal(previewWindow.__DAPPSTER__.splToken, previewWindow.__DAPPSTER_SOLANA_RUNTIME__.splToken)
 assert.equal(previewWindow.solana, previewWindow.phantom.solana)
 assert.equal((await previewWindow.solana.connect()).publicKey.toBase58(), "11111111111111111111111111111111")
 await assert.rejects(() => previewWindow.solana.signTransaction({}), /Wallet signing is disabled/)
+
+const clusterRuntime = buildSolanaRuntimeCompatibilityScript(undefined, "devnet")
+const clusterWindow: Record<string, any> = {
+  __DAPPSTER__: { chain: "solana", preview: false },
+  __DAPPSTER_SOLANA_RUNTIME__: {
+    web3: { PublicKey: MockPublicKey, Connection: MockConnection },
+    anchor: { web3: { PublicKey: MockPublicKey, Connection: MockConnection } },
+    splToken: {},
+    Buffer: Uint8Array,
+    phantomWalletAdapter: {},
+  },
+}
+new Function("window", clusterRuntime)(clusterWindow)
+await clusterWindow.__DAPPSTER_SOLANA_READY__
+assert.equal(clusterWindow.__DAPPSTER__.solanaCluster, "devnet")
+assert.equal(clusterWindow.__DAPPSTER__.solanaRpcUrl, "https://api.devnet.solana.com")
+assert.equal(new clusterWindow.Connection("https://api.mainnet-beta.solana.com").endpoint, "https://api.devnet.solana.com")
+await assert.rejects(
+  () => clusterWindow.__DAPPSTER__.assertSolanaAccount(new clusterWindow.Connection("ignored"), "missing", "SPL token mint"),
+  /does not exist on Solana Devnet/,
+)
 
 class MockBN {
   value: string
