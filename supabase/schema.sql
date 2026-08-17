@@ -715,10 +715,13 @@ create table if not exists public.ai_generation_jobs (
   prompt text not null,
   idempotency_key text unique not null,
   status text not null default 'queued' check (status in ('queued', 'processing', 'completed', 'failed')),
+  phase text not null default 'submission' check (phase in ('submission', 'generation', 'review', 'repair', 'save', 'completed')),
   attempt_count integer not null default 0 check (attempt_count >= 0),
-  max_attempts integer not null default 3 check (max_attempts between 1 and 10),
+  phase_attempt_count integer not null default 0 check (phase_attempt_count >= 0),
+  max_attempts integer not null default 15 check (max_attempts between 1 and 30),
   credits_charged boolean not null default false,
   credits_remaining integer,
+  generation_payload jsonb,
   worker_token uuid,
   lease_expires_at timestamptz,
   next_attempt_at timestamptz not null default now(),
@@ -731,6 +734,8 @@ create index if not exists ai_generation_jobs_ready_idx
   on public.ai_generation_jobs(status, next_attempt_at, created_at);
 create index if not exists ai_generation_jobs_owner_idx
   on public.ai_generation_jobs(owner_id, created_at desc);
+create index if not exists ai_generation_jobs_phase_ready_idx
+  on public.ai_generation_jobs(phase, status, next_attempt_at, created_at);
 alter table public.ai_generation_jobs enable row level security;
 
 drop policy if exists "Owners see their AI generation jobs" on public.ai_generation_jobs;
@@ -808,11 +813,91 @@ begin
 end;
 $$;
 
+create or replace function public.claim_ai_generation_phase(
+  p_job_id uuid,
+  p_owner_id uuid,
+  p_phase text,
+  p_worker_token uuid,
+  p_lease_seconds integer default 300
+)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare v_job public.ai_generation_jobs%rowtype;
+begin
+  if p_phase not in ('submission', 'generation', 'review', 'repair', 'save') then
+    raise exception 'Invalid generation phase';
+  end if;
+  if p_lease_seconds < 30 or p_lease_seconds > 900 then raise exception 'Invalid lease'; end if;
+  update public.ai_generation_jobs set
+    status = 'processing',
+    worker_token = p_worker_token,
+    lease_expires_at = now() + make_interval(secs => p_lease_seconds),
+    attempt_count = attempt_count + 1,
+    phase_attempt_count = phase_attempt_count + 1,
+    error = null,
+    updated_at = now()
+  where id = p_job_id and owner_id = p_owner_id and phase = p_phase
+    and attempt_count < max_attempts and phase_attempt_count < 3
+    and (
+      (status in ('queued', 'failed') and next_attempt_at <= now())
+      or (status = 'processing' and lease_expires_at < now())
+    )
+  returning * into v_job;
+  return coalesce(to_jsonb(v_job), '{}'::jsonb);
+end;
+$$;
+
+create or replace function public.advance_ai_generation_phase(
+  p_job_id uuid,
+  p_worker_token uuid,
+  p_next_phase text,
+  p_generation_payload jsonb
+)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare v_job public.ai_generation_jobs%rowtype;
+begin
+  if p_next_phase not in ('generation', 'review', 'repair', 'save') then
+    raise exception 'Invalid next generation phase';
+  end if;
+  update public.ai_generation_jobs set
+    status = 'queued', phase = p_next_phase, phase_attempt_count = 0,
+    generation_payload = coalesce(p_generation_payload, generation_payload),
+    worker_token = null, lease_expires_at = null, next_attempt_at = now(),
+    error = null, updated_at = now()
+  where id = p_job_id and worker_token = p_worker_token and status = 'processing'
+  returning * into v_job;
+  if not found then raise exception 'Generation lease is no longer valid'; end if;
+  return to_jsonb(v_job);
+end;
+$$;
+
+create or replace function public.fail_ai_generation_phase(
+  p_job_id uuid,
+  p_worker_token uuid,
+  p_error text
+)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare v_job public.ai_generation_jobs%rowtype;
+begin
+  update public.ai_generation_jobs set
+    status = case when phase_attempt_count >= 3 or attempt_count >= max_attempts then 'failed' else 'queued' end,
+    worker_token = null,
+    lease_expires_at = null,
+    next_attempt_at = now() + make_interval(secs => least(120, greatest(5, phase_attempt_count * phase_attempt_count * 5))),
+    error = left(coalesce(p_error, 'Generation phase failed'), 4000),
+    updated_at = now()
+  where id = p_job_id and worker_token = p_worker_token and status = 'processing'
+  returning * into v_job;
+  if not found then raise exception 'Generation lease is no longer valid'; end if;
+  return to_jsonb(v_job);
+end;
+$$;
+
 create or replace function public.complete_ai_generation_job(p_job_id uuid, p_worker_token uuid)
 returns void language plpgsql security definer set search_path = public as $$
 begin
   update public.ai_generation_jobs set
-    status = 'completed', worker_token = null, lease_expires_at = null,
+    status = 'completed', phase = 'completed', generation_payload = null,
+    worker_token = null, lease_expires_at = null,
     error = null, completed_at = now(), updated_at = now()
   where id = p_job_id and worker_token = p_worker_token and status = 'processing';
   if not found then raise exception 'Generation lease is no longer valid'; end if;
@@ -838,12 +923,18 @@ grant all on public.rate_limit_buckets, public.ai_generation_jobs to service_rol
 revoke all on function public.consume_rate_limit(text, integer, integer) from public, anon, authenticated;
 revoke all on function public.create_or_get_ai_generation_job(uuid, uuid, text, bigint, text, text) from public, anon, authenticated;
 revoke all on function public.claim_ai_generation_job(uuid, uuid, uuid, integer) from public, anon, authenticated;
+revoke all on function public.claim_ai_generation_phase(uuid, uuid, text, uuid, integer) from public, anon, authenticated;
+revoke all on function public.advance_ai_generation_phase(uuid, uuid, text, jsonb) from public, anon, authenticated;
+revoke all on function public.fail_ai_generation_phase(uuid, uuid, text) from public, anon, authenticated;
 revoke all on function public.mark_ai_generation_job_charged(uuid, uuid, integer) from public, anon, authenticated;
 revoke all on function public.complete_ai_generation_job(uuid, uuid) from public, anon, authenticated;
 revoke all on function public.fail_ai_generation_job(uuid, uuid, text) from public, anon, authenticated;
 grant execute on function public.consume_rate_limit(text, integer, integer) to service_role;
 grant execute on function public.create_or_get_ai_generation_job(uuid, uuid, text, bigint, text, text) to service_role;
 grant execute on function public.claim_ai_generation_job(uuid, uuid, uuid, integer) to service_role;
+grant execute on function public.claim_ai_generation_phase(uuid, uuid, text, uuid, integer) to service_role;
+grant execute on function public.advance_ai_generation_phase(uuid, uuid, text, jsonb) to service_role;
+grant execute on function public.fail_ai_generation_phase(uuid, uuid, text) to service_role;
 grant execute on function public.mark_ai_generation_job_charged(uuid, uuid, integer) to service_role;
 grant execute on function public.complete_ai_generation_job(uuid, uuid) to service_role;
 grant execute on function public.fail_ai_generation_job(uuid, uuid, text) to service_role;

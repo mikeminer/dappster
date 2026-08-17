@@ -10,6 +10,50 @@
           "initialDelaySeconds": 0
         }
       ]
+    },
+    "app/api/queues/ai-generation-generate/route.ts": {
+      "maxDuration": 300,
+      "experimentalTriggers": [
+        {
+          "type": "queue/v2beta",
+          "topic": "ai-generation-generate",
+          "retryAfterSeconds": 30,
+          "initialDelaySeconds": 0
+        }
+      ]
+    },
+    "app/api/queues/ai-generation-review/route.ts": {
+      "maxDuration": 300,
+      "experimentalTriggers": [
+        {
+          "type": "queue/v2beta",
+          "topic": "ai-generation-review",
+          "retryAfterSeconds": 30,
+          "initialDelaySeconds": 0
+        }
+      ]
+    },
+    "app/api/queues/ai-generation-repair/route.ts": {
+      "maxDuration": 300,
+      "experimentalTriggers": [
+        {
+          "type": "queue/v2beta",
+          "topic": "ai-generation-repair",
+          "retryAfterSeconds": 30,
+          "initialDelaySeconds": 0
+        }
+      ]
+    },
+    "app/api/queues/ai-generation-save/route.ts": {
+      "maxDuration": 300,
+      "experimentalTriggers": [
+        {
+          "type": "queue/v2beta",
+          "topic": "ai-generation-save",
+          "retryAfterSeconds": 30,
+          "initialDelaySeconds": 0
+        }
+      ]
     }
   }
 }

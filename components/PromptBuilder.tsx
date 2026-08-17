@@ -96,6 +96,37 @@ type Generation = {
   mode: "local" | "supabase"
 }
 
+type GenerationPhase = "submission" | "generation" | "review" | "repair" | "save" | "completed"
+
+type QueuedGeneration = {
+  dappId: string
+  jobId: string
+  status: "queued" | "processing" | "completed" | "failed"
+  phase: GenerationPhase
+  creditsRemaining: number | null
+  mode: "supabase"
+}
+
+type GenerationStatus = QueuedGeneration & {
+  attemptCount: number
+  phaseAttemptCount: number
+  error: string | null
+  updatedAt: string
+}
+
+function isQueuedGeneration(value: Generation | QueuedGeneration): value is QueuedGeneration {
+  return "jobId" in value
+}
+
+function generationPhaseLabel(phase: GenerationPhase | null) {
+  if (phase === "submission") return "Preparing generation job"
+  if (phase === "generation") return "Generating contract and interface"
+  if (phase === "review") return "Reviewing Solana program"
+  if (phase === "repair") return "Repairing Solana program and frontend"
+  if (phase === "save") return "Saving generated project"
+  return "Generating contract and interface"
+}
+
 type CompiledArtifact = {
   contractName: string
   abi: Abi
@@ -382,6 +413,7 @@ export function PromptBuilder() {
   const [evmChainId, setEvmChainId] = useState<number>(DEFAULT_EVM_CHAIN_ID)
   const [prompt, setPrompt] = useState("")
   const [loading, setLoading] = useState(false)
+  const [generationPhase, setGenerationPhase] = useState<GenerationPhase | null>(null)
   const [deployStage, setDeployStage] = useState<DeployStage>(null)
   const [generation, setGeneration] = useState<Generation | null>(null)
   const [creditBalance, setCreditBalance] = useState<number | null>(null)
@@ -481,7 +513,7 @@ export function PromptBuilder() {
         runId = ++generationRunRef.current
         setLoading(true)
         setError("")
-        const recovered = await recoverPreparedGeneration(pending, 132, runId)
+        const recovered = await recoverPreparedGeneration(pending, 360, runId)
         if (active && generationRunRef.current === runId && !recovered) setError("Generation is still processing. Dappster will recover it when it is ready; you can safely keep this page open or return later.")
       } catch {
         if (active) localStorage.removeItem(PENDING_GENERATION_KEY)
@@ -575,6 +607,7 @@ export function PromptBuilder() {
     setGeneration(output)
     void loadCreditBalance().then(credits => { if (credits !== null) setCreditBalance(credits) }).catch(() => {})
     setTab("contract")
+    setGenerationPhase(null)
     setError("")
     clearPendingCreditBurn(pending.creditBurn)
     localStorage.removeItem(PENDING_GENERATION_KEY)
@@ -585,19 +618,37 @@ export function PromptBuilder() {
   async function recoverPreparedGeneration(pending: PreparedGeneration, attempts = 1, runId = generationRunRef.current) {
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       if (generationRunRef.current !== runId) return false
+      let status: GenerationStatus | null = null
       try {
-        const project = await apiFetch<SavedGenerationProject>(`/api/dapps/${pending.dappId}`)
+        status = await apiFetch<GenerationStatus>(`/api/generate/status?dappId=${encodeURIComponent(pending.dappId)}`)
         if (generationRunRef.current !== runId) return false
-        if (applyRecoveredGeneration(project, pending)) return true
+        setGenerationPhase(status.phase)
+        if (status.creditsRemaining !== null) setCreditBalance(status.creditsRemaining)
+        if (status.status === "failed") {
+          setError(status.error || "Generation failed after automatic retries. Start a new generation to try again.")
+          clearPendingCreditBurn(pending.creditBurn)
+          localStorage.removeItem(PENDING_GENERATION_KEY)
+          setGenerationPhase(null)
+          return true
+        }
       } catch {
-        // The authenticated project may still be committing after a suspended request.
+        // Older/local deployments may not expose the status route yet. The
+        // saved project remains a compatible recovery source.
       }
-      // Retry the durable job once near the beginning (for a fast provider
-      // failure) and once after the five-minute worker lease can expire. Avoid
-      // repeated POSTs so recovery cannot consume the generation rate limit.
-      if (attempt === 4 || attempt === 124) {
+      if (!status || status.status === "completed") {
         try {
-          const output = await apiFetch<Generation>("/api/generate", {
+          const project = await apiFetch<SavedGenerationProject>(`/api/dapps/${pending.dappId}`)
+          if (generationRunRef.current !== runId) return false
+          if (applyRecoveredGeneration(project, pending)) return true
+        } catch {
+          // The save phase may still be committing its source bundle.
+        }
+      }
+      // Republish a missing submission/outbox message once after the five-minute
+      // lease. The endpoint and Vercel Queue idempotency key make this safe.
+      if (attempt === 60) {
+        try {
+          const output = await apiFetch<Generation | QueuedGeneration>("/api/generate", {
             method: "POST",
             body: JSON.stringify({
               prompt: pending.prompt,
@@ -609,6 +660,12 @@ export function PromptBuilder() {
             }),
           })
           if (generationRunRef.current !== runId) return false
+          if (isQueuedGeneration(output)) {
+            setGenerationPhase(output.phase)
+            setCreditBalance(output.creditsRemaining)
+            continue
+          }
+          setGenerationPhase(null)
           setGeneration(output)
           setCreditBalance(output.creditsRemaining)
           setTab("contract")
@@ -621,7 +678,7 @@ export function PromptBuilder() {
           // A live worker still owns the lease or the retry delay has not elapsed.
         }
       }
-      if (attempt + 1 < attempts) await new Promise(resolve => window.setTimeout(resolve, 2500))
+      if (attempt + 1 < attempts) await new Promise(resolve => window.setTimeout(resolve, 5000))
     }
     return false
   }
@@ -637,6 +694,7 @@ export function PromptBuilder() {
     const requestedEvmChainId = chain === "evm" ? evmChainId : undefined
     const requestedSolanaCluster = chain === "solana" ? solanaCluster : undefined
     setLoading(true)
+    setGenerationPhase("submission")
     setError("")
     setArtifact(null)
     setContractDeployment(null)
@@ -676,10 +734,18 @@ export function PromptBuilder() {
         }
       }
       localStorage.setItem(PENDING_GENERATION_KEY, JSON.stringify(prepared))
-      const output = await apiFetch<Generation>("/api/generate", { method: "POST", signal: controller.signal, body: JSON.stringify({ prompt: requestedPrompt, chain: requestedChain, evmChainId: requestedEvmChainId, includeAudit: false, creditBurn, dappId: prepared.dappId }) })
+      const output = await apiFetch<Generation | QueuedGeneration>("/api/generate", { method: "POST", signal: controller.signal, body: JSON.stringify({ prompt: requestedPrompt, chain: requestedChain, evmChainId: requestedEvmChainId, includeAudit: false, creditBurn, dappId: prepared.dappId }) })
       if (generationRunRef.current !== runId) return
+      if (isQueuedGeneration(output)) {
+        setGenerationPhase(output.phase)
+        setCreditBalance(output.creditsRemaining)
+        const recovered = await recoverPreparedGeneration(prepared, 360, runId)
+        if (!recovered && generationRunRef.current === runId) setError("Generation is still running in the background. You can safely return later; Dappster will resume from the last completed phase.")
+        return
+      }
       clearPendingCreditBurn(creditBurn)
       localStorage.removeItem(PENDING_GENERATION_KEY)
+      setGenerationPhase(null)
       setGeneration(output)
       setCreditBalance(output.creditsRemaining)
       setTab("contract")
@@ -689,7 +755,7 @@ export function PromptBuilder() {
       if (generationRunRef.current !== runId) return
       const message = cause instanceof Error ? cause.message : "Generation failed"
       const interrupted = /load failed|failed to fetch|network request failed|networkerror/i.test(message)
-      if (prepared && interrupted && await recoverPreparedGeneration(prepared, 132, runId)) return
+      if (prepared && interrupted && await recoverPreparedGeneration(prepared, 360, runId)) return
       setError(interrupted && prepared
         ? "The mobile browser paused the connection. Generation is still recoverable and Dappster will resume it when the saved result is ready."
         : message)
@@ -707,6 +773,7 @@ export function PromptBuilder() {
     generationAbortRef.current = null
     localStorage.removeItem(PENDING_GENERATION_KEY)
     setLoading(false)
+    setGenerationPhase(null)
     setError("Generation canceled. A result already completed by the server may still be available in your Dashboard, but it will not replace the project currently shown here.")
   }
 
@@ -1303,7 +1370,7 @@ export function PromptBuilder() {
       </section>
       <section className="panel code-window">
         <div className="panel-head">
-          <div className="status-line"><span className="status-dot" /> {loading ? "Generating contract and interface" : generation ? deployment ? `${selectedAdapter.contractNoun} confirmed · frontend live on IPFS` : contractDeployment ? `${selectedAdapter.contractNoun} confirmed · ready for IPFS` : `Generation complete${displayedCredits === null ? "" : ` · ${displayedCredits} credits left`}` : "Generator ready"}</div>
+          <div className="status-line"><span className="status-dot" /> {loading ? generationPhaseLabel(generationPhase) : generation ? deployment ? `${selectedAdapter.contractNoun} confirmed · frontend live on IPFS` : contractDeployment ? `${selectedAdapter.contractNoun} confirmed · ready for IPFS` : `Generation complete${displayedCredits === null ? "" : ` · ${displayedCredits} credits left`}` : "Generator ready"}</div>
           {generation && <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}><button className="btn btn-ghost" onClick={() => setPreviewOpen(true)}><Eye size={14} /> Preview</button><button className="btn btn-ghost" onClick={copy}>{copied ? <Check size={14} /> : <Copy size={14} />}{copied ? "Copied" : "Copy"}</button>{deployment ? <a className="btn btn-primary" href={deployment.url} target="_blank" rel="noreferrer">Open dApp <ExternalLink size={14} /></a> : <button className="btn btn-primary" disabled={(Boolean(deployStage) && deployStage !== "funding-ready" && deployStage !== "authorization-ready") || !selectedAdapter.deploymentReady} onClick={startOrResumeDeployment}>{deployStage && deployStage !== "funding-ready" && deployStage !== "authorization-ready" ? <Loader2 className="animate-spin" size={14} /> : <Rocket size={14} />}{stageLabel(deployStage, chain, solanaCluster)}</button>}</div>}
         </div>
         {generation ? <><div className="code-tabs"><button className={`code-tab ${tab === "contract" ? "active" : ""}`} onClick={() => setTab("contract")}>{chain === "evm" ? `${generation.name}.sol` : selectedAdapter.sourceFile}</button><button className={`code-tab ${tab === "frontend" ? "active" : ""}`} onClick={() => setTab("frontend")}>App.tsx</button><button className={`code-tab ${tab === "instructions" ? "active" : ""}`} onClick={() => setTab("instructions")}>Deploy.md</button></div><pre className="code-content">{output}</pre>{generation.warnings?.length > 0 && <div className="warning-list"><strong>Model warnings</strong>{generation.warnings.map(warning => <span key={warning}>• {warning}</span>)}</div>}{contractDeployment && <div className="deploy-result"><div><span className="status"><span className="status-dot" /> {selectedAdapter.contractNoun} confirmed on-chain</span><div className="mono">{contractDeployment.address}</div></div>{contractExplorer && <a href={contractExplorer} target="_blank" rel="noreferrer" className="btn btn-outline">Explorer <ExternalLink size={14} /></a>}</div>}{deployment && <div className="deploy-result"><div><span className="status"><span className="status-dot" /> Frontend live on IPFS</span><div className="mono">{deployment.cid}</div></div><a href={deployment.url} target="_blank" rel="noreferrer" className="btn btn-primary">Open <ExternalLink size={14} /></a></div>}</> : <div className="empty-state"><div><div className="empty-icon"><Sparkles size={24} /></div><strong style={{color:"#abb1b9",fontSize:14}}>Your generated dApp will appear here</strong><p style={{fontSize:12,maxWidth:300,lineHeight:1.6}}>Choose a chain, describe the product, and Dappster will call Grok to generate the contract and interface.</p></div></div>}

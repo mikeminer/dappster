@@ -154,6 +154,47 @@ export async function repairGeneratedFrontend(input: {
   return frontend
 }
 
+export async function generateQueuedSolanaDraft(prompt: string, signal?: AbortSignal) {
+  const output = await callXAI(solanaPrompt, prompt, "generation", signal)
+  if (!output) throw new Error("AI provider returned an empty Solana generation response")
+  const generation = parseJson<Generation>(output)
+  // The dedicated review and repair workers own the adversarial safety pass.
+  // This phase only guarantees that a complete draft can be persisted safely.
+  assertGenerationStructure(generation, "solana", { skipSolanaSafety: true })
+  return generation
+}
+
+export async function reviewQueuedSolanaGeneration(productPrompt: string, generation: Generation, signal?: AbortSignal) {
+  return reviewSolanaGeneration(productPrompt, generation, signal)
+}
+
+export async function repairQueuedSolanaGeneration(productPrompt: string, generation: Generation, signal?: AbortSignal) {
+  const contractIssues = solanaContractSafetyIssues(generation.contract)
+  const frontendIssues = solanaFrontendSafetyIssues(generation.frontend)
+  let candidate = generation
+
+  if (contractIssues.length) {
+    candidate = await reviewSolanaGeneration(
+      `${productPrompt}\n\nFinal Dappster safety issues that must be repaired:\n- ${[...contractIssues, ...frontendIssues].join("\n- ")}`,
+      generation,
+      signal,
+    )
+  } else if (frontendIssues.length) {
+    const frontend = await repairGeneratedFrontend({
+      chain: "solana",
+      productPrompt,
+      contractSource: generation.contract,
+      frontendSource: generation.frontend,
+      previewError: `Dappster browser-safety preflight failed:\n- ${frontendIssues.join("\n- ")}`,
+      signal,
+    })
+    candidate = { ...generation, frontend }
+  }
+
+  assertGenerationStructure(candidate, "solana")
+  return candidate
+}
+
 export async function callAI(task: "generate", prompt: string, chain: Chain, options?: GenerationOptions): Promise<Generation>
 export async function callAI(task: "audit", prompt: string, chain: Chain, options?: GenerationOptions): Promise<AuditReport>
 export async function callAI(task: "generate" | "audit", prompt: string, chain: Chain, options: GenerationOptions = {}) {
