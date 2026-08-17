@@ -1,6 +1,6 @@
 import type { Abi } from "viem"
 import { getSupportedEvmChain } from "@/lib/evm-chains"
-import { buildSolanaImportAliases, buildSolanaRuntimeCompatibilityScript, extractCompiledSolanaIdl, inferLegacySolanaIdl, replaceSolanaProgramId, wrapSolanaBabelSource } from "@/lib/solana-frontend"
+import { buildSolanaImportAliases, buildSolanaRuntimeCompatibilityScript, extractCompiledSolanaIdl, inferLegacySolanaIdl, replaceSolanaProgramId, solanaBrowserRpcUrl, wrapSolanaBabelSource } from "@/lib/solana-frontend"
 
 const DAPPSTER_RUNTIME_ORIGIN = "https://dappster.fun/runtime"
 const PREVIEW_RUNTIME_ASSETS = {
@@ -361,11 +361,11 @@ export function buildHTMLShell(frontendCode: string, contractAddress: string, ch
     evmChain: chain === "evm" ? evmRuntimeChain(evmChainId) : undefined,
     solanaCluster: chain === "solana" ? solanaCluster : undefined,
     solanaRpcUrl: chain === "solana" && solanaCluster
-      ? solanaCluster === "devnet" ? "https://api.devnet.solana.com" : "https://api.mainnet-beta.solana.com"
+      ? solanaBrowserRpcUrl(solanaCluster)
       : undefined,
   }).replace(/</g, "\\u003c")
   const evmCompatibility = buildEvmRuntimeCompatibilityScript(contractAbi, chain === "evm" ? evmChainId : undefined)
-  const solanaCompatibility = buildSolanaRuntimeCompatibilityScript(solanaIdl)
+  const solanaCompatibility = buildSolanaRuntimeCompatibilityScript(solanaIdl, solanaCluster)
   const previewDiagnostics = preview ? buildPreviewDiagnosticsScript(chain) : ""
   const browserModuleResolver = buildBrowserModuleResolverScript(chain)
   const previewReady = preview
