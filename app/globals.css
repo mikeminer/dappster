@@ -409,14 +409,20 @@ button { color: inherit; }
 .developer-benefits-count { padding: 5px 9px; border: 1px solid #4f621d; border-radius: 999px; color: var(--acid); background: #151b0d; font: 700 9px/1 "SFMono-Regular", Consolas, monospace; text-transform: uppercase; }
 .developer-benefits-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--line); }
 .developer-benefit-badge { min-width: 0; display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 16px; padding: 22px; background: #0b0d10; }
+.developer-benefit-badge.inactive { opacity: .82; }
 .developer-benefit-medal { width: 58px; height: 58px; display: grid; place-items: center; border: 1px solid #343b45; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #252b34, #0e1115 68%); box-shadow: inset 0 0 0 5px #11151a; }
 .developer-benefit-badge.solana .developer-benefit-medal { color: #14f195; border-color: #376959; }
 .developer-benefit-badge.evm .developer-benefit-medal { color: #c7ff32; border-color: #596c23; }
 .developer-benefit-title { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .developer-benefit-title strong { color: #f1f3f5; font-size: 13px; line-height: 1.45; }
 .developer-benefit-title span { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; padding: 5px 7px; border-radius: 999px; color: #8cf5bd; background: #102219; font: 700 8px/1 "SFMono-Regular", Consolas, monospace; text-transform: uppercase; }
+.developer-benefit-title span.inactive { color: #9aa2ac; background: #1a1e23; }
 .developer-benefit-copy p { margin: 8px 0 11px; color: #8d96a1; font-size: 11px; line-height: 1.65; }
 .developer-benefit-copy a { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; color: var(--acid); font: 700 9px/1.5 "SFMono-Regular", Consolas, monospace; overflow-wrap: anywhere; }
+.developer-benefit-metrics { display: flex; flex-wrap: wrap; gap: 7px; margin: 0 0 12px; }
+.developer-benefit-metrics span { padding: 6px 8px; border: 1px solid #29313a; border-radius: 6px; color: #7e8792; font: 700 8px/1.35 "SFMono-Regular", Consolas, monospace; }
+.developer-benefit-metrics strong { color: #dce1e6; }
+.developer-benefit-actions { display: flex; flex-wrap: wrap; gap: 12px; }
 .developer-benefits-unavailable { grid-column: 1 / -1; padding: 18px 22px; color: #b0b7c0; background: #0b0d10; font-size: 12px; }
 .credit-history-summary { cursor: pointer; list-style: none; user-select: none; }
 .credit-history-summary::-webkit-details-marker { display: none; }

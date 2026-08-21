@@ -1,6 +1,7 @@
 import type { LinkedWallet } from "@/lib/accounts"
 import { getAccountWallets } from "@/lib/accounts"
-import { PASTA_SOLANA_TESTER_MINIMUM, PASTA_TOKEN_BASE_UNITS, PASTA_TOKEN_MINT, qualifiesForSolanaTesterTier } from "@/lib/pasta-developer-policy"
+import { readDevFridgePastaStatus } from "@/lib/pasta-devfridge"
+import { PASTA_DEVFRIDGE_BADGE_URL, PASTA_DEVFRIDGE_LOCK_URL, PASTA_DEVFRIDGE_MIN_LOCK_DAYS, PASTA_DEVFRIDGE_SCAN_URL, PASTA_SOLANA_TESTER_MINIMUM, PASTA_TOKEN_BASE_UNITS, PASTA_TOKEN_MINT, qualifiesForSolanaTesterTier } from "@/lib/pasta-developer-policy"
 
 export type SolanaTesterEntitlement = {
   eligible: boolean
@@ -12,6 +13,16 @@ export type SolanaTesterEntitlement = {
   walletAddress: string | null
   status: "eligible" | "ineligible" | "unavailable"
   checkedAt: string
+  qualificationMode: "wallet-balance" | "devfridge-lock" | "wallet-balance+devfridge-lock" | null
+  lockedBalanceUiAmount: number
+  qualifyingLockCount: number
+  lockMinimumDays: number
+  lockDaysRemaining: number
+  lockNeedsRenewal: boolean
+  devFridgeStatus: "eligible" | "ineligible" | "unavailable"
+  devFridgeLockUrl: string
+  devFridgeScanUrl: string
+  devFridgeBadgeUrl: string
 }
 
 type ParsedTokenAccountResponse = {
@@ -20,11 +31,11 @@ type ParsedTokenAccountResponse = {
 }
 
 type CacheEntry = { expiresAt: number; value: SolanaTesterEntitlement }
-const globalCache = globalThis as typeof globalThis & { __dappsterPastaEntitlements?: Map<string, CacheEntry> }
+const globalCache = globalThis as typeof globalThis & { __dappsterPastaEntitlementsV2?: Map<string, CacheEntry> }
 
 function entitlementCache() {
-  globalCache.__dappsterPastaEntitlements ||= new Map()
-  return globalCache.__dappsterPastaEntitlements
+  globalCache.__dappsterPastaEntitlementsV2 ||= new Map()
+  return globalCache.__dappsterPastaEntitlementsV2
 }
 
 function mainnetRpcUrls() {
@@ -78,26 +89,48 @@ export async function getSolanaTesterEntitlementForWallets(wallets: Pick<LinkedW
 
   const checkedAt = new Date().toISOString()
   let value: SolanaTesterEntitlement
+  const shared = {
+    tokenSymbol: "PASTA" as const,
+    mint: PASTA_TOKEN_MINT,
+    minimumUiAmount: PASTA_SOLANA_TESTER_MINIMUM,
+    lockMinimumDays: PASTA_DEVFRIDGE_MIN_LOCK_DAYS,
+    devFridgeLockUrl: PASTA_DEVFRIDGE_LOCK_URL,
+    devFridgeScanUrl: PASTA_DEVFRIDGE_SCAN_URL,
+    devFridgeBadgeUrl: PASTA_DEVFRIDGE_BADGE_URL,
+  }
   if (!solanaWallets.length) {
-    value = { eligible: false, tier: null, tokenSymbol: "PASTA", mint: PASTA_TOKEN_MINT, minimumUiAmount: PASTA_SOLANA_TESTER_MINIMUM, balanceUiAmount: 0, walletAddress: null, status: "ineligible", checkedAt }
+    value = { ...shared, eligible: false, tier: null, balanceUiAmount: 0, walletAddress: null, status: "ineligible", checkedAt, qualificationMode: null, lockedBalanceUiAmount: 0, qualifyingLockCount: 0, lockDaysRemaining: 0, lockNeedsRenewal: false, devFridgeStatus: "ineligible" }
   } else {
-    const results = await Promise.allSettled(solanaWallets.map(async walletAddress => ({ walletAddress, balanceRaw: await readPastaBalance(walletAddress) })))
-    const balances = results.flatMap(result => result.status === "fulfilled" ? [result.value] : [])
+    const results = await Promise.all(solanaWallets.map(async walletAddress => {
+      const [balance, lock] = await Promise.allSettled([readPastaBalance(walletAddress), readDevFridgePastaStatus(walletAddress)])
+      return { walletAddress, balance, lock }
+    }))
+    const balances = results.flatMap(result => result.balance.status === "fulfilled" ? [{ walletAddress: result.walletAddress, balanceRaw: result.balance.value }] : [])
     const highest = balances.reduce<{ walletAddress: string; balanceRaw: bigint } | null>((current, candidate) => !current || candidate.balanceRaw > current.balanceRaw ? candidate : current, null)
-    const eligible = Boolean(highest && qualifiesForSolanaTesterTier(highest.balanceRaw))
-    const unavailable = !eligible && results.some(result => result.status === "rejected")
+    const locks = results.flatMap(result => result.lock.status === "fulfilled" ? [{ walletAddress: result.walletAddress, ...result.lock.value }] : [])
+    const highestLock = locks.reduce<(typeof locks)[number] | null>((current, candidate) => !current || candidate.lockedRaw > current.lockedRaw ? candidate : current, null)
+    const walletEligible = Boolean(highest && qualifiesForSolanaTesterTier(highest.balanceRaw))
+    const lockEligible = Boolean(highestLock?.eligible)
+    const eligible = walletEligible || lockEligible
+    const walletAddress = lockEligible ? highestLock!.walletAddress : highest?.walletAddress || solanaWallets[0] || null
+    const unavailable = !eligible && results.some(result => result.balance.status === "rejected" || result.lock.status === "rejected")
+    const qualificationMode = walletEligible && lockEligible ? "wallet-balance+devfridge-lock" : walletEligible ? "wallet-balance" : lockEligible ? "devfridge-lock" : null
     value = {
+      ...shared,
       eligible,
       tier: eligible ? "solana-tester" : null,
-      tokenSymbol: "PASTA",
-      mint: PASTA_TOKEN_MINT,
-      minimumUiAmount: PASTA_SOLANA_TESTER_MINIMUM,
       balanceUiAmount: highest ? Number(highest.balanceRaw / PASTA_TOKEN_BASE_UNITS) : 0,
-      walletAddress: highest?.walletAddress || null,
+      walletAddress,
       status: eligible ? "eligible" : unavailable ? "unavailable" : "ineligible",
       checkedAt,
+      qualificationMode,
+      lockedBalanceUiAmount: highestLock ? Number(highestLock.lockedRaw / PASTA_TOKEN_BASE_UNITS) : 0,
+      qualifyingLockCount: highestLock?.qualifyingLockCount || 0,
+      lockDaysRemaining: highestLock?.daysRemaining || 0,
+      lockNeedsRenewal: highestLock?.needsRenewal || false,
+      devFridgeStatus: lockEligible ? "eligible" : results.some(result => result.lock.status === "rejected") ? "unavailable" : "ineligible",
     }
-    if (unavailable) console.warn("[solana-tester-tier] one or more linked Solana wallets could not be checked")
+    if (unavailable) console.warn("[solana-tester-tier] one or more linked Solana wallets could not be checked through RPC or DevFridge")
   }
 
   const cache = entitlementCache()
