@@ -38,9 +38,14 @@ button { color: inherit; }
   position: sticky; top: 0; z-index: 50; background: rgba(7,8,10,.86); backdrop-filter: blur(18px);
 }
 .nav-inner { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.nav-brand-group { min-width: 0; display: flex; align-items: center; gap: 14px; }
 .brand { display: inline-flex; align-items: center; gap: 11px; font-weight: 800; letter-spacing: -.04em; font-size: 20px; }
 .brand-mark { width: 28px; height: 28px; color: var(--acid); display: grid; place-items: center; }
 .brand-dot { color: var(--acid); }
+.devfridge-header-badge { flex: 0 1 auto; display: inline-flex; align-items: center; border-radius: 6px; transition: opacity .2s ease, transform .2s ease; }
+.devfridge-header-badge:hover { opacity: .86; transform: translateY(-1px); }
+.devfridge-header-badge:focus-visible { outline: 2px solid var(--acid); outline-offset: 3px; }
+.devfridge-header-badge img { display: block; width: auto; max-width: 176px; height: 28px; }
 .nav-links { display: flex; align-items: center; gap: 34px; color: #a8aeb7; font-size: 14px; }
 .nav-links a:hover, .nav-links a.active { color: white; }
 .nav-actions { display: flex; align-items: center; gap: 10px; }
@@ -567,6 +572,9 @@ button { color: inherit; }
   .nav-actions .dashboard-link span { display: none; }
   .nav-actions .btn { padding: 0 12px; }
   .nav-actions .btn.dashboard-link { padding: 0; }
+  .nav-inner { gap: 10px; }
+  .nav-brand-group { gap: 8px; }
+  .devfridge-header-badge img { max-width: 128px; height: 22px; }
   .hero { padding: 68px 0 58px; }
   .hero h1 { font-size: clamp(40px, 12vw, 52px); letter-spacing: -.055em; }
   .hero-copy { font-size: 16px; line-height: 1.62; }
@@ -649,6 +657,11 @@ button { color: inherit; }
   .footer-links { flex-wrap: wrap; gap: 14px 20px; }
   .identity-proof-list > div { align-items: flex-start; flex-direction: column; gap: 7px; }
   .identity-proof-list dd { text-align: left; }
+}
+@media (max-width: 440px) {
+  .brand > span:last-child { display: none; }
+  .brand { gap: 0; }
+  .devfridge-header-badge img { max-width: 112px; height: 20px; }
 }
 .visibility-toggle{display:inline-flex;align-items:center;gap:7px;border:1px solid #2a3038;background:#11151a;color:#8d96a1;border-radius:999px;padding:6px 8px 6px 10px;font:inherit;font-size:11px;cursor:pointer;transition:.2s}.visibility-toggle i{display:block;width:24px;height:14px;border-radius:999px;background:#343b44;position:relative}.visibility-toggle i:after{content:"";position:absolute;width:10px;height:10px;border-radius:50%;background:#929ba6;left:2px;top:2px;transition:.2s}.visibility-toggle.active{color:#c7ff32;border-color:#4f621d;background:#151b0d}.visibility-toggle.active i{background:#66851a}.visibility-toggle.active i:after{left:12px;background:#c7ff32}.visibility-toggle:disabled{opacity:.55;cursor:wait}
 .identity-proof-list{display:grid;gap:8px;margin:0}.identity-proof-list>div{display:flex;align-items:center;justify-content:space-between;gap:16px;border-top:1px solid var(--line);padding-top:8px}.identity-proof-list dt{color:var(--muted);font-size:12px}.identity-proof-list dd{margin:0;font-size:12px;overflow-wrap:anywhere;text-align:right}.button-row{display:flex;flex-wrap:wrap;gap:8px}
