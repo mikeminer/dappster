@@ -23,6 +23,7 @@
     "qa:generation-output": "node --no-warnings --experimental-strip-types scripts/qa-generation-output.mts",
     "qa:solana-sandbox": "node --no-warnings --experimental-strip-types scripts/qa-solana-sandbox-recovery.mts",
     "qa:solana-worker": "esbuild scripts/test-solana-async-worker.ts --bundle --platform=node --format=cjs --packages=external --outfile=node_modules/.cache/dappster-tests/solana-worker.cjs && node node_modules/.cache/dappster-tests/solana-worker.cjs",
+    "qa:devfridge": "esbuild scripts/qa-devfridge-entitlement.mts --bundle --platform=node --format=cjs --outfile=node_modules/.cache/dappster-tests/devfridge-entitlement.cjs && node node_modules/.cache/dappster-tests/devfridge-entitlement.cjs",
     "qa:preview-runtime": "node scripts/qa-preview-runtime.mjs"
   },
   "dependencies": {

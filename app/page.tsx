@@ -56,8 +56,8 @@ export default async function Home() {
           </div>
           <div className="tester-tier-grid">
             <article className="tester-tier-card">
-              <div><div className="section-label">// Solana Developer token holder benefit</div><h3>Hold 10,000,000 $PASTA</h3><p>Link the qualifying Solana wallet to unlock unlimited Solana Mainnet and Devnet generations and audits, plus credit-free IPFS publishing. Network fees still apply.</p></div>
-              <a className="btn btn-primary" href="https://pump.fun/coin/39kMeX4HVRW9qbbiHSPbRQ9xeXUF18GrNP6gL61Ppump" target="_blank" rel="noreferrer">View $PASTA</a>
+              <div><div className="section-label">// Solana Developer token holder benefit</div><h3>Hold or lock 10,000,000 $PASTA</h3><p>Link the qualifying Solana wallet and either hold the tokens or lock them with DevFridge for at least 60 days. Unlock unlimited Solana Mainnet and Devnet generations and audits, plus credit-free IPFS publishing. Network fees still apply.</p></div>
+              <div className="developer-benefit-actions"><a className="btn btn-primary" href="https://devfridge.cool?mint=39kMeX4HVRW9qbbiHSPbRQ9xeXUF18GrNP6gL61Ppump&days=60" target="_blank" rel="noreferrer">Lock with DevFridge</a><a className="btn btn-outline" href="https://pump.fun/coin/39kMeX4HVRW9qbbiHSPbRQ9xeXUF18GrNP6gL61Ppump" target="_blank" rel="noreferrer">View $PASTA</a></div>
             </article>
             <article className="tester-tier-card">
               <div><div className="section-label">// EVM Developer token holder benefit</div><h3>Hold 50,000,000 $pappardelle</h3><p>Link the qualifying EVM wallet to unlock unlimited generations and audits on supported EVM networks, plus credit-free IPFS publishing. Network fees still apply.</p></div>

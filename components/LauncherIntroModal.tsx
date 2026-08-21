@@ -4,10 +4,10 @@ import Image from "next/image"
 import { ArrowRight, ExternalLink, ShieldCheck, Sparkles, X } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 
-const SESSION_KEY = "dappster:launcher-intro:v5"
+const SESSION_KEY = "dappster:launcher-intro:v6"
 const CREATOR_URL = "https://www.base.org/name/pappardelle"
 const CREATOR_TOKEN_URL = "https://pappardellefaucet.vercel.app/"
-const PASTA_TOKEN_URL = "https://pump.fun/coin/39kMeX4HVRW9qbbiHSPbRQ9xeXUF18GrNP6gL61Ppump"
+const PASTA_LOCK_URL = "https://devfridge.cool?mint=39kMeX4HVRW9qbbiHSPbRQ9xeXUF18GrNP6gL61Ppump&days=60"
 const SUBSCRIPTION_CONTRACT = "0xea7e37d45b6f75ae6826c1925d7b0ac314c7ecae"
 const CONTRACT_URL = `https://basescan.org/address/${SUBSCRIPTION_CONTRACT}`
 
@@ -24,10 +24,10 @@ const DEPLOYMENT_BENEFITS = [
   {
     ecosystem: "Solana",
     amount: "10,000,000 PASTA",
-    description: "Link the qualifying Solana mainnet wallet for unlimited generations and security audits on Solana mainnet and devnet.",
+    description: "Link the qualifying Solana wallet and hold the tokens, or lock them with DevFridge for at least 60 days, for unlimited Solana generations and security audits.",
     disclaimer: "Program rent, network fees and IPFS publishing costs still apply.",
-    action: "Explore PASTA",
-    href: PASTA_TOKEN_URL,
+    action: "Lock with DevFridge",
+    href: PASTA_LOCK_URL,
     logo: "/chain-logos/solana.svg",
   },
 ] as const
